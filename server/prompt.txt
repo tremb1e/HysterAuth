@@ -1,0 +1,13 @@
+我在投稿四大安全顶会，需要同时提交代码，请根据此背景帮我完善以下内容。
+
+请仔细阅读项目代码 @/home/tremb1e/work/server ，并经过仔细思考后完成以下内容
+
+1.请按照 @/home/tremb1e/work/server/paper.txt 中描述的内容对项目中的代码文件以及相应内容进行修改。
+（1）请为论文中所描述的每个模块单独生成一个python文件，其中的内容需要符合 @/home/tremb1e/work/server/paper.txt 中的描述；
+（2）请确保（1）中每个单独生成的python文件都可以运行，若无真实数据可以模拟，并给出合适的输出；
+2.请修改 @/home/tremb1e/work/server ，确保server是先将传感器数据转换为离散序列化数据，再使用优化的transformer进行认证，最后再加上HysterAuth模块。
+3.删除 @/home/tremb1e/work/server 中的无用文件；
+4.请确保 @/home/tremb1e/work/server 可运行；
+5.将 @/home/tremb1e/work/server 中的所有文件中的所有注释修改为英文；
+6.请编写相关的例子验证 1中实现的代码和 @/home/tremb1e/work/server 是可以成功运行的。
+7.不要添加其他如创建容器镜像的代码文件。

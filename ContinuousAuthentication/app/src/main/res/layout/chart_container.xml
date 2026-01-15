@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- Chart title -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/sensor_data_visualization"
+        android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
+        android:gravity="center"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Sensor chart view -->
+    <com.continuousauth.ui.chart.SensorChartView
+        android:id="@+id/sensorChartView"
+        android:layout_width="match_parent"
+        android:layout_height="300dp"
+        android:background="@color/chart_background"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Chart stats -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center">
+
+        <TextView
+            android:id="@+id/tvChartStats"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/chart_stats_placeholder"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="@color/secondary_text" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnClearChart"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:text="@string/clear_chart"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+
+</LinearLayout>

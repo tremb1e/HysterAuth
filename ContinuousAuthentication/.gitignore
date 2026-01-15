@@ -1,0 +1,71 @@
+# Gradle / build outputs
+.gradle/
+**/build/
+
+# Built application / library artifacts
+*.apk
+*.aab
+*.aar
+*.ap_
+*.dex
+*.class
+
+# Local configuration (SDK paths, etc.)
+local.properties
+
+# IntelliJ / Android Studio
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# Android Studio generated folders
+.navigation/
+captures/
+
+# Native build outputs
+.externalNativeBuild/
+.cxx/
+
+# Kotlin/Compose tooling caches
+.kotlin/
+*.kotlin_module
+
+# Room schema exports (generated)
+app/schemas/
+
+# Logs and diagnostics
+*.log
+*.hprof
+
+# Signing / secrets (do not commit)
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.csr
+keystore.properties
+google-services.json
+.env
+.env.*
+
+# Editors
+.vscode/
+*~
+*.swp
+*.swo
+
+# macOS / Windows
+.DS_Store
+Thumbs.db
+desktop.ini
+gradlew.bat
+*.bat
+*.cmd
+*.ps1

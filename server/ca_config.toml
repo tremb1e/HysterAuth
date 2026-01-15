@@ -1,0 +1,77 @@
+# Continuous Authentication unified configuration file.
+# Notes:
+# - This file centralizes key thresholds for data preprocessing, windowing, training, and authentication policies,
+#   so parameters can be tuned without changing code.
+# - TOML format; loaded by the server at runtime.
+
+[processing]
+# Preprocessing trigger: start processing only when a single user (device ID directory) accumulates at least this
+# amount of raw session data (MB). Matches the "100MB" requirement.
+min_total_mb = 100
+
+# Target amount of data to process: sort sessions by time (timestamp in filename or mtime, ascending), then
+# accumulate from the earliest session until the target (MB) is reached, taking the first X sessions.
+# Matches the "take the first X sessions totaling 100MB" requirement.
+target_total_mb = 100
+
+# Number of worker processes for preprocessing (session resampling and window generation share this limit).
+# The current spec uses 5 processes; adjust as needed.
+workers = 5
+
+# HMOG attacker selection (ordered by HMOG directory name):
+# - val: use the first N HMOG subjects as attacker data
+# - test: use the next M HMOG subjects as attacker data
+hmog_val_subject_count = 1
+hmog_test_subject_count = 1
+
+# HMOG attacker data size caps (important):
+# A single HMOG subject CSV can be hundreds of MB; without caps, val/test can reach tens of millions of rows,
+# which then leads to "explosive" window CSV growth (each window size produces ~2x rows; 10 window sizes ~20x).
+# To keep end-to-end processing/training within reasonable time/disk, we cap the number of rows (tune as needed).
+
+# Max rows to read for a single HMOG subject (subject_id), summed across train/val/test CSVs.
+hmog_max_rows_per_subject = 200000
+
+# Max rows to read when merging HMOG attackers for a split (val or test), summed across multiple subject_ids.
+hmog_max_rows_total = 1000000
+
+[windows]
+# Window sizes (seconds) used for preprocessing, training, and authentication.
+# Current setting: w = 0.2s.
+sizes = [0.2]
+
+# Window overlap ratio: 0.5 means stride = window_size * (1 - overlap) = window_size / 2.
+# Matches the "step_size is half of window_size" requirement.
+overlap = 0.5
+
+# Target sampling rate (Hz) used to align all sensor modalities; matches the on-device sampling rate (100Hz).
+sampling_rate_hz = 100
+
+[auth]
+# Authentication decision target: expected time to produce the first interruption decision (seconds).
+# Current setting: T = 2s.
+max_decision_time_sec = 2.0
+
+# Decision policy (vote rule):
+# In the most recent N windows, if reject >= M, treat as attacker and trigger an interruption (e.g., lock/re-auth).
+#
+# Current policy: within 7 consecutive windows, if at least 6 are rejected, trigger interruption.
+vote_window_size = 7
+vote_min_rejects = 6
+
+# (Backward-compatible) "K consecutive rejects" rule:
+# - "by_window": K = ceil(max_decision_time_sec / stride_sec)
+#   where stride_sec = window_size_sec * (1 - overlap).
+#   Example: window=0.2s, overlap=0.5 -> stride=0.1s => K=20.
+# When vote_* is enabled, the server uses the vote rule by default.
+k_rejects_mode = "by_window"
+
+# To improve attacker detection (reduce false accepts), the system may tolerate a small number of interruptions
+# for genuine users (false rejections). Larger values make the system more sensitive (lower miss rate) but cause
+# more false interruptions.
+#
+# For this configuration, we aim to improve attacker detection while minimizing interruptions for genuine users,
+# so the upper bound for window-level false rejection rate (FRR) is tightened to 0.05.
+# Note: FRR is computed per window and excludes the last (N-1) windows of each session (insufficient to form a
+# full N-window vote window).
+target_window_frr = 0.05

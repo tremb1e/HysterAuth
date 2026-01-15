@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Production gRPC server configuration -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">api.continuousauth.com</domain>
+        <domain includeSubdomains="true">grpc.continuousauth.com</domain>
+        
+        <!-- Certificate pinning configuration (SPKI pinning) -->
+        <pin-set expiration="2026-12-31">
+            <!-- Primary certificate SHA-256 pin (replace with the actual server certificate pin) -->
+            <pin digest="SHA-256">7HIpactkIAq2Y49orFOOQKurWxmmSFZhBCoQYcRhJ3Y=</pin>
+            <!-- Backup certificate pin for smooth rotation -->
+            <pin digest="SHA-256">YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2fuihg=</pin>
+            <!-- Let's Encrypt backup root certificate -->
+            <pin digest="SHA-256">sRHdihwgkaib1P1gxX8HFszlD+7/gTfNvuAybgLPNis=</pin>
+        </pin-set>
+        
+        <trust-anchors>
+            <!-- Trust system CAs only -->
+            <certificates src="system"/>
+        </trust-anchors>
+    </domain-config>
+    
+    <!-- NTP time sync server configuration -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">pool.ntp.org</domain>
+        <domain includeSubdomains="false">time.google.com</domain>
+        <domain includeSubdomains="false">time.cloudflare.com</domain>
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </domain-config>
+    
+    <!-- Global security configuration -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <!-- Production: trust system certificates only -->
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+    
+    <!-- Debug configuration -->
+    <debug-overrides>
+        <trust-anchors>
+            <!-- Debug: allow user-added certificates for local testing -->
+            <certificates src="user"/>
+            <certificates src="system"/>
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>

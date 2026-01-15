@@ -1,0 +1,111 @@
+\subsection{Modality Aware Diffusion for Data Augmentation}
+To mitigate the overfitting risks inherent in few-shot enrollment scenarios, we introduce a customized Denoising Diffusion Probabilistic Model (DDPM). Unlike conventional geometric augmentation techniques, which often corrupt the intrinsic temporal dynamics and micro-motion patterns of inertial biometrics~\cite{li2018using,li2022adaptive}, our approach synthesizes high-fidelity, multi-modal sensor streams that preserve the underlying manifold structure.
+
+\paragraph{Modality-Aware Encoder $f_{\text{enc}}^{(s)}(\cdot)$.}
+Acknowledging the heterogeneity of sensor channels, we design distinct encoders for each sensor modality $s \in \{\mathrm{acc}, \mathrm{gyr}, \mathrm{mag}\}$. These encoders map raw signal segments $\mathbf{u}^{(s)}_{1:L}$ into a unified latent space via $\mathbf{x}_0^{(s)} = f_{\text{enc}}^{(s)}(\mathbf{u}^{(s)}_{1:L})$. A global context vector $\mathbf{c}=\mathrm{Fuse}(\{\mathbf{x}_0^{(s)}\}_s)$ is subsequently derived to condition the generative process on cross-modal correlations.
+
+\paragraph{Domain-Specific Noise Schedule.}
+We employ a domain-conditioned noise schedule where the variance $\beta_t^{(s)} = g_\beta(t, \phi_s)$ is modulated jointly by the diffusion timestep $t$ and sensor-specific parameters $\phi_s$. This alignment ensures that the diffusion process respects the distinct spectral characteristics of each modality.
+
+The forward diffusion process perturbs the latent encodings according to:
+\begin{equation}
+q(\mathbf{x}_t^{(s)} \mid \mathbf{x}_0^{(s)}) = \mathcal{N}\left(\mathbf{x}_t^{(s)}; \sqrt{\bar{\alpha}_t^{(s)}}\,\mathbf{x}_0^{(s)}, (1-\bar{\alpha}_t^{(s)})\mathbf{I}\right),
+\end{equation}
+where $\alpha_t^{(s)} = 1-\beta_t^{(s)}$ and $\bar{\alpha}_t^{(s)}$ denotes the cumulative product. The reverse denoising process $p_\theta$ reconstructs the clean signal conditioned on the fused context $\mathbf{c}$:
+\begin{equation}
+\mu_\theta^{(s)}(\mathbf{x}_t^{(s)}, t, \mathbf{c}) = \frac{1}{\sqrt{\alpha_t^{(s)}}}\left(\mathbf{x}_t^{(s)} - \frac{1-\alpha_t^{(s)}}{\sqrt{1-\bar{\alpha}_t^{(s)}}}\,\epsilon_\theta^{(s)}(\mathbf{x}_t^{(s)}, t, \mathbf{c})\right).
+\end{equation}
+This mechanism generates diverse, identity-preserving fingerprints $\hat{\mathbf{x}}_0^{(s)}$, significantly enhancing model robustness against environmental variability and sensor noise.
+
+\subsection{Vector Quantization for Behavioral Fingerprint Embedding}
+To bridge the gap between continuous noisy sensor signals and discrete behavioral semantics, we employ a Vector Quantization (VQ) mechanism. This stage transforms high-dimensional time-series data into compact, symbolic representations, enabling efficient sequence modeling.
+
+Given a sensor input $x \in \mathbb{R}^{T \times m}$ (where $m$ represents the channel dimension), an encoder $E(\cdot)$ maps it to a latent representation $z_e$. We utilize a learnable codebook $\mathcal{C}=\{c_k\}_{k=1}^K$ to quantize $z_e$ via a nearest neighbor lookup:
+\begin{equation}
+z_q(i,j) = c_{k^*}, \quad \text{where } k^* = \operatorname*{arg\,min}_k \lVert z_e(i,j) - c_k\rVert_2^2.
+\end{equation}
+This quantization serves as an \textit{information bottleneck}, constraining the mutual information to mitigate potential inversion attacks. The optimization objective integrates reconstruction loss, codebook alignment, and adversarial constraints:
+\begin{equation}
+\mathcal{L} = \mathcal{L}_{rec} + \lVert \text{sg}[z_e] - z_q\rVert_2^2 + \beta \lVert z_e - \text{sg}[z_q]\rVert_2^2 + \mathcal{L}_{adv},
+\end{equation}
+where $\text{sg}[\cdot]$ denotes the stop-gradient operator. This process yields high-density symbolic tokens that encapsulate abstract behavioral primitives. 
+% Note: I adjusted the beta position above to match standard VQ-VAE (beta on commitment loss). Revert if your implementation differs.
+
+\subsection{Real-Time Sequence Modeling based on Self-Attention}
+This stage leverages a Time-Series Transformer~\cite{vaswani2017attention} to capture long-range dependencies and transitional probabilities within the quantized behavioral sequence.
+
+\paragraph{Hierarchical Behavioral Grammar Learning.}
+For a discrete token sequence $s = [s_1, \dots, s_n]$, we apply scaled dot-product self-attention with causal masking to prevent information leakage from future states:
+\begin{equation}
+\mathrm{Attention}(Q,K,V) = \operatorname{softmax}\left(\frac{QK^\top}{\sqrt{d_k}} + M_{\text{causal}}\right)V,
+\end{equation}
+where $d_k$ is the dimension of the key vectors. By integrating cues across varying temporal resolutions, this mechanism implicitly learns the ``behavioral grammar'' specific to legitimate users.
+
+\paragraph{Probabilistic Authentication Scoring.}
+Rather than rendering hard decisions on instantaneous inputs, the Transformer estimates the conditional probability $p(s_i \mid s_{<i}, u)$. We define the raw authentication score for the current sliding window as the log-likelihood:
+\begin{equation}
+\mathcal{S}_{auth} = \frac{1}{n}\sum_{i=1}^n \log p(s_i \mid s_{<i}, u).
+\end{equation}
+High scores signify consistency with the user's behavioral manifold, whereas abrupt drops indicate potential anomalies or intrusions. The sequence $\mathcal{S}_{auth}$ serves as the input for the subsequent decision logic.
+
+\subsection{Adaptive Decision with Hysteresis}
+Sensor signals are typically generated as high-sampling-rate, continuous streams characterized by strong temporal correlation, significant cross-channel coupling, frequent noise/missing segments, and context-dependent individual behavioral drift. While self-attention naturally excels at modeling long-range dependencies and dynamic weighting of identity-related patterns, the inherent nature of sensor data means that even with a low per-window false positive rate, false alarms accumulate linearly over prolonged usage. This triggers frequent lockouts or re-authentication, significantly increasing friction for legitimate users.
+
+Therefore, we propose a \textbf{Hysteresis-Based False Rejection Mitigation Strategy}. We accumulate anomalous \emph{soft evidence} for each window and trigger an anomaly state only when the accumulated evidence crosses an entry threshold. Simultaneously, we employ a more relaxed exit threshold to prevent jitter in critical regions, significantly reducing false alarm triggers while maintaining malicious user detection capabilities.
+
+\paragraph{Acquisition and Stabilization of Per-Window Anomaly Probability}
+Let the CA main model output an anomaly score (or log-odds/similarity) $s_t \in \mathbb{R}$ for the $t$-th sliding window $w_t$. To facilitate sequential evidence accumulation, we map this to an anomaly ``quasi-probability'':
+\begin{equation}
+\tilde{p}_t = \sigma(\alpha s_t + \beta) = \frac{1}{1+\exp(-(\alpha s_t+\beta))},
+\label{eq:platt}
+\end{equation}
+where $\alpha, \beta$ are obtained via temperature scaling/Platt scaling on a validation set to enhance comparability across users and scenarios. To avoid infinite log-odds when $\tilde{p}_t$ is $0$ or $1$, we apply clipping:
+\begin{equation}
+p_t = \mathrm{clip}(\tilde{p}_t, \varepsilon, 1-\varepsilon),
+\quad \varepsilon \in (0, 10^{-3}].
+\label{eq:clip}
+\end{equation}
+
+\paragraph{Log-Odds Evidence and Accumulation $K_t$}
+We define the anomaly evidence for each window as the log-odds:
+\begin{equation}
+\ell_t = \log\frac{p_t}{1-p_t}.
+\label{eq:logodds}
+\end{equation}
+Intuitively, $\ell_t>0$ indicates the model favors ``anomaly/attacker,'' $\ell_t<0$ favors ``normal/legitimate user,'' and $|\ell_t|$ represents confidence strength.
+
+We define accumulated evidence $K_t$ as sequential accumulation with a \emph{forgetting factor} $\lambda$:
+\begin{equation}
+K_t = \lambda K_{t-1} + \ell_t,
+\quad 0<\lambda<1,\quad K_0=0.
+\label{eq:accumulate}
+\end{equation}
+Here, $\lambda$ controls the decay rate of historical evidence, equivalent to applying a first-order IIR smoothing to $\{\ell_t\}$. Its effective memory length is approximately:
+\begin{equation}
+L_{\mathrm{eff}} \approx \frac{1}{1-\lambda},
+\label{eq:leff}
+\end{equation}
+allowing adjustment between ``rapid attack response'' (small $L_{\mathrm{eff}}$) and ``strong suppression of sporadic false alarm spikes'' (large $L_{\mathrm{eff}}$). In practice, we saturate $K_t$ to enhance long-term stability:
+\begin{equation}
+K_t \leftarrow \mathrm{clip}(K_t, -K_{\max}, K_{\max}),
+\label{eq:sat}
+\end{equation}
+where $K_{\max}$ is a sufficiently large constant (e.g., 20).
+
+\paragraph{Hysteresis Decision}
+We introduce a binary latent variable $S_t \in \{\textsf{Normal}, \textsf{Abnormal}\}$ representing the current system state, and use a pair of hysteresis thresholds
+\begin{equation}
+\Theta_{\mathrm{enter}} > \Theta_{\mathrm{exit}}
+\label{eq:th_order}
+\end{equation}
+to switch states based on $K_t$, forming a \emph{hysteresis band} $\left(\Theta_{\mathrm{exit}}, \Theta_{\mathrm{enter}}\right)$ to suppress critical region jitter. The update rule is:
+\begin{equation}
+S_t =
+\begin{cases}
+\textsf{Abnormal}, & \text{if } S_{t-1}=\textsf{Normal} \ \wedge\ K_t \ge \Theta_{\mathrm{enter}},\\
+\textsf{Normal},   & \text{if } S_{t-1}=\textsf{Abnormal}\ \wedge\ K_t \le \Theta_{\mathrm{exit}},\\
+S_{t-1},           & \text{otherwise}.
+\end{cases}
+\label{eq:hysteresis}
+\end{equation}
+The reporting strategy to the endpoint is: trigger an event report only when $S_t$ switches (e.g., trigger lock/re-auth upon entering \textsf{Abnormal}; trigger recovery upon returning to \textsf{Normal}), remaining silent otherwise. This significantly reduces frequent state flips and user friction caused by false alarms.

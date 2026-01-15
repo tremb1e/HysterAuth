@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Primary colors -->
+    <color name="primary_color">#1976D2</color>
+    <color name="primary_variant">#1565C0</color>
+    <color name="secondary_color">#03DAC6</color>
+    <color name="secondary_variant">#018786</color>
+    
+    <!-- Background colors -->
+    <color name="background">#FFFFFF</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="card_background">#FAFAFA</color>
+    
+    <!-- Text colors -->
+    <color name="primary_text">#212121</color>
+    <color name="secondary_text">#757575</color>
+    <color name="disabled_text">#BDBDBD</color>
+    <color name="text_on_primary">#FFFFFF</color>
+    <color name="text_on_secondary">#000000</color>
+    
+    <!-- Status colors -->
+    <color name="status_running">#4CAF50</color>
+    <color name="status_stopped">#F44336</color>
+    <color name="status_paused">#FF9800</color>
+    <color name="status_error">#F44336</color>
+    
+    <!-- Sensor status colors -->
+    <color name="sensor_active">#4CAF50</color>
+    <color name="sensor_inactive">#9E9E9E</color>
+    <color name="sensor_unavailable">#F44336</color>
+    
+    <!-- Network quality colors -->
+    <color name="network_excellent">#4CAF50</color>
+    <color name="network_good">#8BC34A</color>
+    <color name="network_poor">#FF9800</color>
+    <color name="network_disconnected">#F44336</color>
+    
+    <!-- Material Design colors -->
+    <color name="material_blue_500">#2196F3</color>
+    <color name="material_blue_700">#1976D2</color>
+    <color name="material_green_500">#4CAF50</color>
+    <color name="material_orange_500">#FF9800</color>
+    <color name="material_red_500">#F44336</color>
+    <color name="material_grey_300">#E0E0E0</color>
+    <color name="material_grey_500">#9E9E9E</color>
+    <color name="material_grey_700">#616161</color>
+    
+    <!-- Chart colors -->
+    <color name="accelerometer_color">#2196F3</color>
+    <color name="gyroscope_color">#4CAF50</color>
+    <color name="magnetometer_color">#FF9800</color>
+    <color name="chart_background">#FAFAFA</color>
+    <color name="chart_grid">#E0E0E0</color>
+    <color name="chart_text">#616161</color>
+    
+    <!-- Alias for backward compatibility -->
+    <color name="primary">@color/primary_color</color>
+    <color name="colorPrimary">@color/primary_color</color>
+
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    
+    <!-- Additional colors -->
+    <color name="hint_text">#61000000</color>
+    <color name="accent_color">#FF4081</color>
+    <color name="status_connected">@color/status_running</color>
+    <color name="status_disconnected">@color/material_grey_500</color>
+    <color name="status_connecting">@color/material_orange_500</color>
+    
+    <!-- Trust score -->
+    <color name="credit_excellent">#4CAF50</color>
+    <color name="credit_good">#8BC34A</color>
+    <color name="credit_fair">#FF9800</color>
+    <color name="credit_poor">#F44336</color>
+    
+    <!-- Button colors -->
+    <color name="button_start">#4CAF50</color>
+    <color name="button_stop">#F44336</color>
+    
+    <!-- Data text -->
+    <color name="data_text">#424242</color>
+    <color name="title_text">#212121</color>
+    
+    <!-- Bottom navigation colors -->
+    <color name="bottom_nav_item_color">@color/primary_color</color>
+</resources>

@@ -1,0 +1,173 @@
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.hilt.android)
+    alias(libs.plugins.protobuf)
+}
+
+android {
+    namespace = "com.continuousauth"
+    compileSdk = 35 // Support Android 16 (VanillaIceCream)
+
+    defaultConfig {
+        applicationId = "com.continuousauth"
+        minSdk = 30  // Compatible with Android 11+
+        targetSdk = 35 // Target Android 16 (VanillaIceCream)
+        versionCode = 1
+        versionName = "1.0"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = true
+            proguardFiles(
+                    getDefaultProguardFile("proguard-android-optimize.txt"),
+                    "proguard-rules.pro"
+            )
+            // Server public key fingerprint (production)
+            buildConfigField "String", "SERVER_KEY_FINGERPRINT", '""'
+        }
+        debug {
+            // Server public key fingerprint (debug; empty disables pinning)
+            buildConfigField "String", "SERVER_KEY_FINGERPRINT", '""'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+    
+    // Room: schema export location
+    ksp {
+        arg("room.schemaLocation", "$projectDir/schemas")
+    }
+
+    buildFeatures {
+        viewBinding = true
+        dataBinding = true
+        compose = true
+        buildConfig = true
+    }
+
+    sourceSets {
+        getByName("main") {
+            proto.srcDir("src/main/proto")
+        }
+    }
+}
+
+protobuf {
+    protoc {
+        artifact = libs.protobuf.protoc.get().toString()
+    }
+    plugins {
+        create("grpc") {
+            artifact = "io.grpc:protoc-gen-grpc-java:${libs.versions.grpc.get()}"
+        }
+    }
+    generateProtoTasks {
+        all().forEach { task ->
+            task.builtins {
+                create("java") {
+                    option("lite")
+                }
+            }
+            task.plugins {
+                create("grpc") {
+                    option("lite")
+                }
+            }
+        }
+    }
+}
+
+dependencies {
+    // Core dependencies
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.google.material)
+    implementation(libs.androidx.constraintlayout)
+    
+    // Jetpack Compose
+    implementation(platform("androidx.compose:compose-bom:2024.02.00"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.compose.runtime:runtime-livedata")
+    implementation("androidx.navigation:navigation-compose:2.7.7")
+    debugImplementation("androidx.compose.ui:ui-tooling")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    // Kotlin coroutines
+    implementation(libs.kotlinx.coroutines.android)
+
+    // Hilt DI (via KSP)
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.compiler)
+    implementation("androidx.hilt:hilt-navigation-compose:1.0.0")
+
+    // Networking: gRPC, Protobuf, OkHttp
+    implementation(libs.grpc.okhttp)
+    implementation(libs.grpc.protobuf.lite)
+    implementation(libs.grpc.stub)
+    implementation(libs.protobuf.javalite)
+    implementation(libs.okhttp)
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.converter.gson)
+    implementation(libs.javax.annotation.api)
+
+    // Crypto: Google Tink
+    implementation(libs.google.crypto.tink)
+    
+    // Secure storage: AndroidX Security
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // Persistence: Room (via KSP)
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
+
+    // Settings: DataStore
+    implementation(libs.androidx.datastore.preferences)
+
+    // Jetpack ViewModel and LiveData
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
+    implementation(libs.androidx.lifecycle.livedata.ktx)
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
+
+    // Navigation
+    implementation(libs.androidx.navigation.fragment.ktx)
+    implementation(libs.androidx.navigation.ui.ktx)
+
+    // Permissions
+    implementation(libs.androidx.fragment.ktx)
+    
+    // Charts: MPAndroidChart
+    implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
+    
+    // Compression: LZ4
+    implementation("org.lz4:lz4-java:1.8.0")
+
+    // Testing
+    testImplementation(libs.junit)
+    testImplementation(libs.mockito.core)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.kotlinx.coroutines.test)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.espresso.core)
+    androidTestImplementation(libs.hilt.android.testing)
+    kspAndroidTest(libs.hilt.compiler)
+}

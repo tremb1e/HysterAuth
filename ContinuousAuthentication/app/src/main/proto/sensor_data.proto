@@ -1,0 +1,187 @@
+syntax = "proto3";
+
+package com.continuousauth.proto;
+
+option java_multiple_files = true;
+option java_package = "com.continuousauth.proto";
+
+// Data packet message
+message DataPacket {
+    string packet_id = 1;                  // Batch identifier, e.g., UUID
+    string device_id_hash = 2;             // HMAC(key_id, device_instance_id) - not plaintext
+    int64 base_wall_ms = 3;                // Wall clock at batch creation (UTC, NTP-adjusted)
+    int64 device_uptime_ns = 4;            // Monotonic uptime at batch creation
+    optional int64 ntp_offset_ms = 5;      // Client-computed NTP clock offset
+    
+    // Envelope encryption fields
+    bytes encrypted_sensor_payload = 6;    // Ciphertext from Tink StreamingAead or AEAD (typically the full batch payload)
+    bytes encrypted_dek = 7;               // DEK encrypted with the server public key (HybridEncrypt)
+    string dek_key_id = 8;                 // Server key identifier used to decrypt the DEK
+    
+    Metadata metadata = 9;
+    
+    // Anti-replay and sequencing
+    int64 packet_seq_no = 10;              // Globally increasing sequence number
+    bytes sha256 = 11;                     // SHA-256 checksum of the payload or file (used by disk queue)
+}
+
+message Metadata {
+    string app_version = 1;
+    int32 android_api_level = 2;
+    string schema_version = 3;
+    string transmission_profile = 4;       // "WIFI_ONLY" / "UNRESTRICTED" (optional client preference)
+    string compression = 5;                // "lz4"/"none"
+    string encryption_scheme = 6;          // e.g. "Envelope-StreamingAead-AES256GCM"
+    string key_version = 7;                // Keyset/version used for this packet
+    int32 uncompressed_size_bytes = 8;     // Uncompressed payload size
+    int64 client_processing_time_ms = 9;   // Client-side processing time
+}
+
+message SerializedSensorBatch {
+    repeated SensorSample samples = 1;
+    string user_id_hash = 2;               // HMAC(key_id, user_id) - not plaintext
+    string session_id = 3;
+}
+
+message SensorSample {
+    SensorType type = 1;
+    int64 event_timestamp_ns = 2;          // Relative timestamp (elapsedRealtimeNanos)
+    float x = 3;
+    float y = 4;
+    float z = 5;
+    int32 accuracy = 6;
+    int64 seq_no = 7;                      // Per-sample sequence number for consistency/anti-replay
+    string foreground_app_hash = 8;        // HMAC(key_id, packageName) - not plaintext
+}
+
+enum SensorType {
+    SENSOR_TYPE_UNKNOWN = 0;
+    ACCELEROMETER = 1;
+    GYROSCOPE = 2;
+    MAGNETOMETER = 3;
+}
+
+// Server-to-client directive message
+message ServerDirective {
+    oneof directive {
+        Ack ack = 1;
+        PolicyUpdate policy = 2;
+        KeyRotationNotice key_rotation = 3;
+        EmergencyStop emergency = 4;
+    }
+}
+
+message Ack {
+    string packet_id = 1;
+    int64 creation_server_ts = 2;           // Server receive timestamp (required)
+    bool success = 3;
+    string error_code = 4;                  // Error code for client-side handling
+    int32 retry_after_ms = 5;               // Suggested retry delay
+}
+
+message PolicyUpdate {
+    string policy_id = 1;
+    string policy_version = 2;
+    
+    // Batching / transport settings
+    int32 batch_interval_ms = 3;            // Suggested client batch window (ms)
+    int32 max_payload_size_bytes = 4;       // Maximum DataPacket size in bytes
+    float upload_rate_limit = 5;            // Allowed packets/sec (or bytes/sec)
+    
+    // Transport configuration
+    string transmission_profile = 6;        // "WIFI_ONLY" / "UNRESTRICTED"
+    string compression_algorithm = 7;       // "lz4"
+    int32 batch_size_threshold = 8;         // Trigger upload based on sample/time threshold
+    
+    // Collection configuration
+    map<string, int32> sensor_sampling_rates = 9;  // Sensor sampling rates (Hz)
+    repeated string enabled_sensors = 10;
+    
+    // User-specific configuration
+    map<string, string> user_config = 11;
+    
+    // Anomaly detection configuration
+    AnomalyConfig anomaly_config = 12;
+}
+
+message AnomalyConfig {
+    bool enabled = 1;
+    float threshold_multiplier = 2;         // Anomaly threshold multiplier
+    int32 window_size_sec = 3;              // Detection window size (seconds)
+    int32 cooldown_period_sec = 4;          // Cooldown period (seconds)
+}
+
+message KeyRotationNotice {
+    string new_key_id = 1;
+    string public_key_fingerprint = 2;
+    int64 effective_from_ts = 3;
+    int64 deprecate_old_after_ts = 4;
+}
+
+message EmergencyStop {
+    string reason = 1;
+    int32 stop_duration_sec = 2;
+    bool clear_local_cache = 3;
+}
+
+// Heartbeat messages
+message Heartbeat {
+    int64 client_timestamp = 1;
+    int32 pending_packets = 2;              // Pending packet count
+    int64 last_packet_seq_no = 3;
+}
+
+message HeartbeatAck {
+    int64 server_timestamp = 1;
+    int64 client_timestamp_echo = 2;        // Echoes client timestamp
+}
+
+// Policy request message
+message PolicyRequest {
+    string device_id_hash = 1;              // HMAC(key_id, device_instance_id) - not plaintext
+    string app_version = 2;
+    int32 android_api_level = 3;
+    string current_policy_id = 4;
+}
+
+// Observability metrics message
+message MetricsReport {
+    string device_id_hash = 1;              // HMAC(key_id, device_instance_id) - not plaintext
+    int64 timestamp_ms = 2;
+    int64 reporting_period_ms = 3;
+    
+    // Aggregated counters (no sensitive data)
+    int64 batches_processed = 4;
+    int64 uploads_success = 5;
+    int64 uploads_failed = 6;
+    int64 sensor_samples_collected = 7;
+    int64 anomalies_detected = 8;
+    
+    // Performance metrics
+    double avg_upload_latency_ms = 9;
+    double avg_cpu_usage_percent = 10;
+    int64 peak_memory_usage_mb = 11;
+    
+    // Upload success rate
+    double upload_success_rate = 12;
+}
+
+message MetricsResponse {
+    bool accepted = 1;
+    optional string message = 2;
+}
+
+// gRPC service definition
+service SensorDataService {
+    // Bidirectional streaming RPC: client sends DataPacket, server returns ServerDirective
+    rpc StreamSensorData(stream DataPacket) returns (stream ServerDirective);
+    
+    // Unary RPC: fetch initial policy configuration
+    rpc GetInitialPolicy(PolicyRequest) returns (PolicyUpdate);
+    
+    // Unary RPC: heartbeat
+    rpc SendHeartbeat(Heartbeat) returns (HeartbeatAck);
+    
+    // Unary RPC: report aggregated metrics
+    rpc ReportMetrics(MetricsReport) returns (MetricsResponse);
+}

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- 
+        Exclude sensitive data from cloud backups
+        -->
+        <exclude domain="sharedpref" path="crypto_preferences.xml"/>
+        <exclude domain="sharedpref" path="session_preferences.xml"/>
+        <exclude domain="database" path="sensor_data.db"/>
+        <exclude domain="file" path="encrypted_queue/"/>
+    </cloud-backup>
+    
+    <device-transfer>
+        <!-- 
+        Exclude sensitive data from device transfers
+        -->
+        <exclude domain="sharedpref" path="crypto_preferences.xml"/>
+        <exclude domain="sharedpref" path="session_preferences.xml"/>
+        <exclude domain="database" path="sensor_data.db"/>
+        <exclude domain="file" path="encrypted_queue/"/>
+    </device-transfer>
+</data-extraction-rules>
