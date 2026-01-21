@@ -19,7 +19,7 @@ cd server
 python -m src.processing.cli --user <device_id_hash>
 ```
 
-2) Train per-user VQGAN models and generate policy files:
+2) Train per-user VQ models and generate policy files:
 ```
 cd server
 python -m src.training.cli --user <device_id_hash>
@@ -28,13 +28,13 @@ python -m src.training.cli --user <device_id_hash>
 3) Train token Transformer models (HMOG scripts):
 ```
 cd server/ca_train
-python hmog_vqgan_token_transformer_experiment.py --dataset-path <processed_window_root> --users <user_id>
+python hmog_vq_token_transformer_experiment.py --dataset-path <processed_window_root> --users <user_id>
 ```
 
 4) Run offline inference with trained checkpoints:
 ```
 cd server/ca_train
-python hmog_token_auth_inference.py --csv-path <window_csv> --window-size <sec> --vqgan-checkpoint <path> --lm-checkpoint <path>
+python hmog_token_auth_inference.py --csv-path <window_csv> --window-size <sec> --vq-checkpoint <path> --lm-checkpoint <path>
 ```
 
 5) Adjust decision policies via `server/ca_config.toml` and per-user `best_lock_policy.json`.

@@ -2,17 +2,17 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from mingpt import GPT
-from vqgan import VQGAN
+from vq_autoencoder import VQAutoencoder
 
 
-class VQGANTransformer(nn.Module):
+class VQTransformer(nn.Module):
     def __init__(self, args):
-        super(VQGANTransformer, self).__init__()
+        super(VQTransformer, self).__init__()
 
         self.sos_token = args.sos_token
         self.codebook_hw = getattr(args, "codebook_shape", (3, 6))
 
-        self.vqgan = self.load_vqgan(args)
+        self.vq = self.load_vq(args)
 
         # Small GPT: hyperparameters controlled by args (aim for ~5–30M params).
         target_block = getattr(args, "gpt_block_size", getattr(args, "block_size", 32))
@@ -33,15 +33,15 @@ class VQGANTransformer(nn.Module):
         self.pkeep = args.pkeep
 
     @staticmethod
-    def load_vqgan(args):
-        model = VQGAN(args)
+    def load_vq(args):
+        model = VQAutoencoder(args)
         model.load_checkpoint(args.checkpoint_path)
         model = model.eval()
         return model
 
     @torch.no_grad()
     def encode_to_z(self, x):
-        quant_z, indices, _ = self.vqgan.encode(x)
+        quant_z, indices, _ = self.vq.encode(x)
         self.codebook_hw = quant_z.shape[2:]
         indices = indices.view(quant_z.shape[0], -1)
         return quant_z, indices
@@ -49,9 +49,9 @@ class VQGANTransformer(nn.Module):
     @torch.no_grad()
     def z_to_image(self, indices, p1=None, p2=None):
         h, w = self.codebook_hw if p1 is None or p2 is None else (p1, p2)
-        ix_to_vectors = self.vqgan.codebook.embedding(indices).reshape(indices.shape[0], h, w, self.vqgan.codebook.latent_dim)
+        ix_to_vectors = self.vq.codebook.embedding(indices).reshape(indices.shape[0], h, w, self.vq.codebook.latent_dim)
         ix_to_vectors = ix_to_vectors.permute(0, 3, 1, 2)
-        image = self.vqgan.decode(ix_to_vectors)
+        image = self.vq.decode(ix_to_vectors)
         return image
 
     def forward(self, x):

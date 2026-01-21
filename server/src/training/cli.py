@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train VQGAN-only models from server window datasets")
+    parser = argparse.ArgumentParser(description="Train VQ-only models from server window datasets")
     parser.add_argument("--user", required=True, help="Target user/device hash (subject ID) to train.")
     parser.add_argument("--device", default="cuda:0", help="Training device, e.g. cuda:0 / cuda:1 / cpu.")
     parser.add_argument(
@@ -19,7 +19,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Window sizes (sec) to train. Defaults to ca_config.toml [windows].sizes.",
     )
-    parser.add_argument("--vqgan-epochs", type=int, default=10, help="Epochs to train the VQGAN model.")
+    parser.add_argument("--vq-epochs", dest="vq_epochs", type=int, default=10, help="Epochs to train the VQ model.")
     parser.add_argument("--batch-size", type=int, default=None, help="Optional override for CA-train --batch-size.")
     parser.add_argument("--max-train-per-user", type=int, default=None, help="Optional cap for --max-train-per-user (CPU smoke tests).")
     parser.add_argument("--max-negative-per-split", type=int, default=None, help="Optional override for --max-negative-per-split.")
@@ -38,7 +38,7 @@ def main() -> None:
         args.user,
         device=args.device,
         window_sizes=list(args.window_sizes) if args.window_sizes else None,
-        vqgan_epochs=int(args.vqgan_epochs),
+        vq_epochs=int(args.vq_epochs),
         batch_size=int(args.batch_size) if args.batch_size is not None else None,
         max_train_per_user=int(args.max_train_per_user) if args.max_train_per_user is not None else None,
         max_negative_per_split=int(args.max_negative_per_split) if args.max_negative_per_split is not None else None,

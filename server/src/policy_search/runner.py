@@ -20,8 +20,8 @@ from .pareto import ParetoPoint, pareto_frontier
 
 logger = logging.getLogger(__name__)
 
-AUTH_METHOD_VQGAN_ONLY = "vqgan-only"
-AUTH_METHOD_VQGAN_TRANSFORMER = "vqgan+transformer"
+AUTH_METHOD_VQ_ONLY = "vq-only"
+AUTH_METHOD_VQ_TRANSFORMER = "vq+transformer"
 
 # Prompt Step 12: explicit (N, M) sweep ranges (inclusive).
 # - N in [7, 20]
@@ -47,28 +47,28 @@ PROMPT_VOTE_MIN_REJECTS_RANGE_BY_N: Dict[int, Tuple[int, int]] = {
 def _normalize_auth_method(value: str) -> str:
     value = str(value or "").strip().lower()
     aliases = {
-        "vqgan": AUTH_METHOD_VQGAN_ONLY,
-        "vqgan_only": AUTH_METHOD_VQGAN_ONLY,
-        "vqgan-only": AUTH_METHOD_VQGAN_ONLY,
-        "vqganonly": AUTH_METHOD_VQGAN_ONLY,
-        "transformer": AUTH_METHOD_VQGAN_TRANSFORMER,
-        "lm": AUTH_METHOD_VQGAN_TRANSFORMER,
-        "vqgan_lm": AUTH_METHOD_VQGAN_TRANSFORMER,
-        "vqgan+transformer": AUTH_METHOD_VQGAN_TRANSFORMER,
-        "vqgan_transformer": AUTH_METHOD_VQGAN_TRANSFORMER,
-        "vqgan+lm": AUTH_METHOD_VQGAN_TRANSFORMER,
+        "vq": AUTH_METHOD_VQ_ONLY,
+        "vq_only": AUTH_METHOD_VQ_ONLY,
+        "vq-only": AUTH_METHOD_VQ_ONLY,
+        "vqonly": AUTH_METHOD_VQ_ONLY,
+        "transformer": AUTH_METHOD_VQ_TRANSFORMER,
+        "lm": AUTH_METHOD_VQ_TRANSFORMER,
+        "vq_lm": AUTH_METHOD_VQ_TRANSFORMER,
+        "vq+transformer": AUTH_METHOD_VQ_TRANSFORMER,
+        "vq_transformer": AUTH_METHOD_VQ_TRANSFORMER,
+        "vq+lm": AUTH_METHOD_VQ_TRANSFORMER,
     }
     normalized = aliases.get(value, value)
-    if normalized not in {AUTH_METHOD_VQGAN_ONLY, AUTH_METHOD_VQGAN_TRANSFORMER}:
-        raise ValueError(f"Unsupported auth_method={value!r}; expected vqgan-only or vqgan+transformer.")
+    if normalized not in {AUTH_METHOD_VQ_ONLY, AUTH_METHOD_VQ_TRANSFORMER}:
+        raise ValueError(f"Unsupported auth_method={value!r}; expected vq-only or vq+transformer.")
     return normalized
 
 
 def _auth_method_tag(auth_method: str) -> str:
     auth_method = _normalize_auth_method(auth_method)
-    if auth_method == AUTH_METHOD_VQGAN_ONLY:
-        return "vqgan_only"
-    return "vqgan_transformer"
+    if auth_method == AUTH_METHOD_VQ_ONLY:
+        return "vq_only"
+    return "vq_transformer"
 
 
 def _server_root() -> Path:
@@ -99,7 +99,7 @@ def _default_models_root(server_root: Path) -> Path:
 def _ckpt_paths(models_root: Path, user: str, window_size: float) -> Tuple[Path, Path]:
     ckpt_dir = models_root / user / "checkpoints"
     return (
-        ckpt_dir / f"vqgan_user_{user}_ws_{window_size:.1f}.pt",
+        ckpt_dir / f"vq_user_{user}_ws_{window_size:.1f}.pt",
         ckpt_dir / f"token_gpt_user_{user}_ws_{window_size:.1f}.pt",
     )
 
@@ -129,7 +129,7 @@ def _load_or_score_split(
     overlap: float,
     target_width: int,
     csv_path: Path,
-    vqgan_ckpt: Path,
+    vq_ckpt: Path,
     lm_ckpt: Path,
     device: str,
     token_batch_size: int,
@@ -149,9 +149,9 @@ def _load_or_score_split(
         "overlap": float(overlap),
         "target_width": int(target_width),
         "csv": _file_fingerprint(csv_path),
-        "vqgan_ckpt": _file_fingerprint(vqgan_ckpt),
+        "vq_ckpt": _file_fingerprint(vq_ckpt),
     }
-    if auth_method == AUTH_METHOD_VQGAN_TRANSFORMER:
+    if auth_method == AUTH_METHOD_VQ_TRANSFORMER:
         expected["lm_ckpt"] = _file_fingerprint(lm_ckpt)
 
     if npz_path.exists() and meta_path.exists():
@@ -173,7 +173,7 @@ def _load_or_score_split(
         auth_method=str(auth_method),
         window_size=float(window_size),
         target_width=int(target_width),
-        vqgan_ckpt=vqgan_ckpt,
+        vq_ckpt=vq_ckpt,
         lm_ckpt=lm_ckpt,
         device=str(device),
         token_batch_size=int(token_batch_size),
@@ -197,31 +197,31 @@ def _score_split_inprocess(
     auth_method: str,
     window_size: float,
     target_width: int,
-    vqgan_ckpt: Path,
+    vq_ckpt: Path,
     lm_ckpt: Path,
     device: str,
     token_batch_size: int,
     use_amp: bool,
 ) -> ScoreArrays:
     auth_method = _normalize_auth_method(auth_method)
-    if auth_method == AUTH_METHOD_VQGAN_ONLY:
-        return _score_split_vqgan_only_inprocess(
+    if auth_method == AUTH_METHOD_VQ_ONLY:
+        return _score_split_vq_only_inprocess(
             csv_path=csv_path,
             target_user=target_user,
             window_size=window_size,
             target_width=target_width,
-            vqgan_ckpt=vqgan_ckpt,
+            vq_ckpt=vq_ckpt,
             device=device,
             batch_size=int(token_batch_size),
             use_amp=bool(use_amp),
         )
 
-    return _score_split_vqgan_transformer_inprocess(
+    return _score_split_vq_transformer_inprocess(
         csv_path=csv_path,
         target_user=target_user,
         window_size=window_size,
         target_width=target_width,
-        vqgan_ckpt=vqgan_ckpt,
+        vq_ckpt=vq_ckpt,
         lm_ckpt=lm_ckpt,
         device=device,
         token_batch_size=int(token_batch_size),
@@ -229,13 +229,13 @@ def _score_split_inprocess(
     )
 
 
-def _score_split_vqgan_transformer_inprocess(
+def _score_split_vq_transformer_inprocess(
     *,
     csv_path: Path,
     target_user: str,
     window_size: float,
     target_width: int,
-    vqgan_ckpt: Path,
+    vq_ckpt: Path,
     lm_ckpt: Path,
     device: str,
     token_batch_size: int,
@@ -246,12 +246,12 @@ def _score_split_vqgan_transformer_inprocess(
     import torch  # local import to keep policy_search import light
     from torch import amp
 
-    from hmog_token_auth_inference import load_lm, load_vqgan
+    from hmog_token_auth_inference import load_lm, load_vq
     from hmog_data import iter_windows_from_csv_unlabeled_with_session
     from hmog_tokenizer import encode_windows_to_tokens
 
     torch_device = torch.device(device)
-    vqgan = load_vqgan(Path(vqgan_ckpt), device=torch_device, cfg_path=None)
+    vq = load_vq(Path(vq_ckpt), device=torch_device, cfg_path=None)
     lm = load_lm(Path(lm_ckpt), device=torch_device, cfg_path=None)
 
     batch_windows: List[np.ndarray] = []
@@ -271,7 +271,7 @@ def _score_split_vqgan_transformer_inprocess(
             return
         windows_np = np.stack(batch_windows, axis=0).astype(np.float32, copy=False)
         tok = encode_windows_to_tokens(
-            vqgan,
+            vq,
             windows_np,
             batch_size=int(token_batch_size),
             device=torch_device,
@@ -318,13 +318,13 @@ def _score_split_vqgan_transformer_inprocess(
     return ScoreArrays(session_ids=sessions_all, labels=labels_all, scores=scores_all)
 
 
-def _score_split_vqgan_only_inprocess(
+def _score_split_vq_only_inprocess(
     *,
     csv_path: Path,
     target_user: str,
     window_size: float,
     target_width: int,
-    vqgan_ckpt: Path,
+    vq_ckpt: Path,
     device: str,
     batch_size: int,
     use_amp: bool,
@@ -334,11 +334,11 @@ def _score_split_vqgan_only_inprocess(
     import torch  # local import to keep policy_search import light
     from torch import amp
 
-    from hmog_token_auth_inference import load_vqgan
+    from hmog_token_auth_inference import load_vq
     from hmog_data import iter_windows_from_csv_unlabeled_with_session
 
     torch_device = torch.device(device)
-    vqgan = load_vqgan(Path(vqgan_ckpt), device=torch_device, cfg_path=None)
+    vq = load_vq(Path(vq_ckpt), device=torch_device, cfg_path=None)
 
     batch_windows: List[np.ndarray] = []
     batch_labels: List[int] = []
@@ -358,7 +358,7 @@ def _score_split_vqgan_only_inprocess(
         windows_np = np.stack(batch_windows, axis=0).astype(np.float32, copy=False)
         batch = torch.from_numpy(windows_np).to(device=torch_device, dtype=torch.float32, non_blocking=True)
         with amp.autocast(device_type=torch_device.type, enabled=bool(use_amp)):
-            decoded, _, _ = vqgan(batch)
+            decoded, _, _ = vq(batch)
             errors = torch.mean((batch - decoded) ** 2, dim=(1, 2, 3))
         scores = (-errors).detach().cpu().numpy().astype(np.float32, copy=False)
         scores_chunks.append(scores)
@@ -468,7 +468,7 @@ def run_policy_grid_search(
     user: str,
     *,
     device: str = "cuda:0",
-    auth_method: str = AUTH_METHOD_VQGAN_TRANSFORMER,
+    auth_method: str = AUTH_METHOD_VQ_TRANSFORMER,
     cfg: Optional[GridSearchConfig] = None,
     ca_cfg: Optional[CAConfig] = None,
     dataset_root: Optional[Path] = None,
@@ -501,14 +501,14 @@ def run_policy_grid_search(
     out_dir.mkdir(parents=True, exist_ok=True)
     auth_method = _normalize_auth_method(auth_method)
     method_tag = _auth_method_tag(auth_method)
-    if auth_method == AUTH_METHOD_VQGAN_TRANSFORMER:
+    if auth_method == AUTH_METHOD_VQ_TRANSFORMER:
         grid_csv = out_dir / "grid_results.csv"
         pareto_csv = out_dir / "pareto_frontier.csv"
         best_json = models_root / user / "best_lock_policy.json"
     else:
-        grid_csv = out_dir / "grid_results_vqgan_only.csv"
-        pareto_csv = out_dir / "pareto_frontier_vqgan_only.csv"
-        best_json = out_dir / "best_lock_policy_vqgan_only.json"
+        grid_csv = out_dir / "grid_results_vq_only.csv"
+        pareto_csv = out_dir / "pareto_frontier_vq_only.csv"
+        best_json = out_dir / "best_lock_policy_vq_only.json"
 
     _ensure_ca_train_on_path()
     from hmog_consecutive_rejects import (  # type: ignore[import-not-found]
@@ -523,9 +523,9 @@ def run_policy_grid_search(
 
     for ws in cfg.window_sizes:
         ws_f = float(ws)
-        vqgan_ckpt, lm_ckpt = _ckpt_paths(models_root, user, ws_f)
-        if not vqgan_ckpt.exists() or not lm_ckpt.exists():
-            raise FileNotFoundError(f"Missing checkpoints for user={user} ws={ws_f:.1f}: {vqgan_ckpt} / {lm_ckpt}")
+        vq_ckpt, lm_ckpt = _ckpt_paths(models_root, user, ws_f)
+        if not vq_ckpt.exists() or not lm_ckpt.exists():
+            raise FileNotFoundError(f"Missing checkpoints for user={user} ws={ws_f:.1f}: {vq_ckpt} / {lm_ckpt}")
 
         target_width = _resolve_target_width(lm_ckpt, default=50)
 
@@ -545,7 +545,7 @@ def run_policy_grid_search(
             overlap=overlap,
             target_width=target_width,
             csv_path=val_csv_path,
-            vqgan_ckpt=vqgan_ckpt,
+            vq_ckpt=vq_ckpt,
             lm_ckpt=lm_ckpt,
             device=device,
             token_batch_size=int(cfg.token_batch_size),
@@ -560,7 +560,7 @@ def run_policy_grid_search(
             overlap=overlap,
             target_width=target_width,
             csv_path=test_csv_path,
-            vqgan_ckpt=vqgan_ckpt,
+            vq_ckpt=vq_ckpt,
             lm_ckpt=lm_ckpt,
             device=device,
             token_batch_size=int(cfg.token_batch_size),
@@ -709,7 +709,7 @@ def run_policy_grid_search(
                         "threshold": float(threshold),
                         "interrupt_time_sec_min": float(interrupt_time_sec),
                         "feasible_within_max_decision_time": int(feasible_1s),
-                        "vqgan_checkpoint": str(vqgan_ckpt),
+                        "vq_checkpoint": str(vq_ckpt),
                         "lm_checkpoint": str(lm_ckpt),
                         # Window-level metrics
                         "val_far": float(val_metrics.get("far", 0.0) or 0.0),
@@ -804,7 +804,7 @@ def run_policy_grid_search(
                 "k_rejects_mode": str(ca_cfg.auth.k_rejects_mode),
                 "threshold": float(best["threshold"]),
                 "interrupt_time_sec": float(best["interrupt_time_sec_min"]),
-                "vqgan_checkpoint": str(best["vqgan_checkpoint"]),
+                "vq_checkpoint": str(best["vq_checkpoint"]),
                 "lm_checkpoint": str(best["lm_checkpoint"]),
                 "grid_search": {
                     "grid_results_csv": str(grid_csv),

@@ -29,7 +29,7 @@ from hmog_data import (
     prepare_user_datasets,
     precompute_all_user_windows,
 )
-from vqgan import VQGAN
+from vq_autoencoder import VQAutoencoder
 
 
 def set_seed(seed: int, cuda: bool = False) -> None:
@@ -42,7 +42,7 @@ def set_seed(seed: int, cuda: bool = False) -> None:
 
 def setup_logging(log_dir: Path) -> Tuple[Path, Path]:
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "hmog_vqgan.log"
+    log_file = log_dir / "hmog_vq.log"
     metrics_txt = log_dir / "hmog_metrics.txt"
     logging.basicConfig(
         level=logging.INFO,
@@ -313,10 +313,10 @@ def train_single_window(
         args.input_height = 12
         args.input_width = int(args.target_width) if args.target_width > 0 else int(round(window_size * 100))
 
-    # VQGAN blocks read `use_nonlocal`; CLI exposes `--no-nonlocal` for convenience.
+    # The VQ autoencoder blocks read `use_nonlocal`; CLI exposes `--no-nonlocal` for convenience.
     args.use_nonlocal = not getattr(args, "no_nonlocal", False)
 
-    model = VQGAN(args).to(device)
+    model = VQAutoencoder(args).to(device)
     use_dp = torch.cuda.device_count() > 1 and not args.no_data_parallel
     if use_dp:
         model = nn.DataParallel(model)
@@ -397,7 +397,7 @@ def train_single_window(
     model_to_save = model.module if isinstance(model, nn.DataParallel) else model
     ckpt_dir = Path(args.output_dir) / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-    ckpt_path = ckpt_dir / f"vqgan_user_{user_id}_ws_{window_size:.1f}.pt"
+    ckpt_path = ckpt_dir / f"vq_user_{user_id}_ws_{window_size:.1f}.pt"
     torch.save(model_to_save.state_dict(), ckpt_path)
 
     return {
@@ -605,7 +605,7 @@ def run_experiments(args: argparse.Namespace, text_log_path: Path) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="HMOG VQGAN window sweep")
+    parser = argparse.ArgumentParser(description="HMOG VQ (vector-quantized autoencoder) window sweep")
     parser.add_argument(
         "--dataset-path",
         type=str,
@@ -653,7 +653,7 @@ def parse_args() -> argparse.Namespace:
         "--base-channels",
         type=int,
         default=96,
-        help="VQGAN encoder/decoder base channels (suggest 64/96/128; smaller is faster/less VRAM).",
+        help="VQ autoencoder encoder/decoder base channels (suggest 64/96/128; smaller is faster/less VRAM).",
     )
     parser.add_argument("--latent-dim", type=int, default=256)
     parser.add_argument("--num-codebook-vectors", type=int, default=512)

@@ -15,9 +15,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="cuda:0", help="Scoring device, e.g. cuda:0 / cuda:1 / cpu.")
     parser.add_argument(
         "--auth-method",
-        choices=["vqgan-only", "vqgan+transformer", "both"],
-        default="vqgan-only",
-        help="Which per-window score to use for offline policy search (default: vqgan-only).",
+        choices=["vq-only", "vq+transformer", "both"],
+        default="vq-only",
+        help="Which per-window score to use for offline policy search (default: vq-only).",
     )
     parser.add_argument("--no-write-best", dest="write_best", action="store_false", help="Do not overwrite best_lock_policy.json.")
     parser.set_defaults(write_best=True)
@@ -101,7 +101,7 @@ def main() -> None:
         use_amp=bool(args.use_amp),
         write_per_combo=bool(args.write_per_combo),
     )
-    methods = ["vqgan-only", "vqgan+transformer"] if args.auth_method == "both" else [str(args.auth_method)]
+    methods = ["vq-only", "vq+transformer"] if args.auth_method == "both" else [str(args.auth_method)]
     for method in methods:
         out = run_policy_grid_search(
             args.user,

@@ -66,7 +66,7 @@ cd server
 python -m src.processing.cli --user <device_id_hash>
 ```
 
-2) Train per-user models (VQGAN and policy selection):
+2) Train per-user models (VQ and policy selection):
 ```
 cd server
 python -m src.training.cli --user <device_id_hash>

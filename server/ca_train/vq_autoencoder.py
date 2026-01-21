@@ -5,9 +5,10 @@ from encoder import Encoder
 from decoder import Decoder
 from codebook import Codebook
 from torchsummary import summary
-class VQGAN(nn.Module):
+
+class VQAutoencoder(nn.Module):
     def __init__(self, args):
-        super(VQGAN, self).__init__()
+        super(VQAutoencoder, self).__init__()
         # Do not pin submodules to a device here; let the caller control `.to(device)`
         # so CPU fallback / multi-GPU setups work reliably.
         self.encoder = Encoder(args)

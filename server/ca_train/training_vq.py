@@ -1,3 +1,5 @@
+"""Legacy experiment: VQ autoencoder trainer (VQ is used in the main pipeline; discriminator code is legacy)."""
+
 import os
 import argparse
 from tqdm import tqdm
@@ -7,7 +9,7 @@ import torch.nn.functional as F
 from torchvision import utils as vutils
 from discriminator import Discriminator
 from lpips import LPIPS
-from vqgan import VQGAN
+from vq_autoencoder import VQAutoencoder
 from utils import load_data, weights_init
 from data_loaders import CIFAR10DataLoader_pro
 from construct_dataset import * 
@@ -17,13 +19,14 @@ from mutils import Bar, Logger, AverageMeter, mkdir_p, savefig
 import time
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1'
-class TrainVQGAN:
-    def __init__(self, args, user_id, total_far, total_frr, total_err, total_f1, total_auc):
-        self.vqgan = VQGAN(args).to(device=args.device)
-        #self.vqgan = torch.nn.parallel.DistributedDataParallel(self.vqgan, device_ids=[0])
+
+class TrainVQAutoencoder:
+    def __init__(self, args, user_id, total_far, total_frr, total_err, total_f1, total_auc, x_train, y_train, x_valid, y_valid, subjects):
+        self.vq = VQAutoencoder(args).to(device=args.device)
+        #self.vq = torch.nn.parallel.DistributedDataParallel(self.vq, device_ids=[0])
         '''
-        self.vqgan = DDP(
-                self.vqgan,
+        self.vq = DDP(
+                self.vq,
                 device_ids=[torch.device(f"cuda")],
                 output_device=torch.device(f"cuda"),
                 broadcast_buffers=False,
@@ -31,13 +34,13 @@ class TrainVQGAN:
                 find_unused_parameters=False,
             )
         '''
-        self.vqgan = torch.nn.DataParallel(self.vqgan, device_ids=[0,1])
+        #self.vq = torch.nn.DataParallel(self.vq, device_ids=[0,1])
         '''
-        self.vqgan.load_checkpoint(args.checkpoint_path)
-        self.vqgan = self.vqgan.eval()
+        self.vq.load_checkpoint('./checkpoints/vq_epoch_0.pt')
+        self.vq = self.vq.eval()
         '''
         self.discriminator = Discriminator(args).to(device=args.device)
-        self.discriminator = torch.nn.DataParallel(self.discriminator, device_ids=[0,1])
+        #self.discriminator = torch.nn.DataParallel(self.discriminator, device_ids=[0,1])
         #print("the layer is:", summary(self.discriminator, (1,12,50)))
         #exit(-1)
         self.discriminator.apply(weights_init)
@@ -46,16 +49,16 @@ class TrainVQGAN:
 
         self.prepare_training()
 
-        self.trainwithoutdis(args, user_id, total_far, total_frr, total_err, total_f1, total_auc)
+        self.trainwithoutdis(args, user_id, total_far, total_frr, total_err, total_f1, total_auc, x_train, y_train, x_valid, y_valid, subjects)
 
     def configure_optimizers(self, args):
         lr = args.learning_rate
         opt_vq = torch.optim.Adam(
-            list(self.vqgan.module.encoder.parameters()) +
-            list(self.vqgan.module.decoder.parameters()) +
-            list(self.vqgan.module.codebook.parameters()) +
-            list(self.vqgan.module.quant_conv.parameters()) +
-            list(self.vqgan.module.post_quant_conv.parameters()),
+            list(self.vq.encoder.parameters()) +
+            list(self.vq.decoder.parameters()) +
+            list(self.vq.codebook.parameters()) +
+            list(self.vq.quant_conv.parameters()) +
+            list(self.vq.post_quant_conv.parameters()),
             lr=lr, eps=1e-08, betas=(args.beta1, args.beta2)
         )
         opt_disc = torch.optim.Adam(self.discriminator.parameters(),
@@ -77,7 +80,7 @@ class TrainVQGAN:
         
         train_dataset = CIFAR10DataLoader_pro(x_train, y_train, split="train", batch_size = args.batch_size, user_num=user_num)
         #test_dataloader = CIFAR10DataLoader_pro(x_valid, y_valid, split="test", batch_size = len(x_valid), user_num=user_num)
-        test_dataloader = CIFAR10DataLoader_pro(x_valid, y_valid, split="test", batch_size = 1024, user_num=user_num)
+        test_dataloader = CIFAR10DataLoader_pro(x_valid, y_valid, split="test", batch_size = 128, user_num=user_num)
         '''
         train_dataset = CIFAR10DataLoader(
         data_dir='./dataset',
@@ -92,13 +95,13 @@ class TrainVQGAN:
                 for i, (imgs,_) in zip(pbar, train_dataset):
                     imgs = imgs.type(torch.FloatTensor)
                     imgs = imgs.to(device=args.device)
-                    decoded_images, _, q_loss = self.vqgan(imgs)
+                    decoded_images, _, q_loss = self.vq(imgs)
                     #print("#######################", decoded_images.size(), imgs.size())
 
                     disc_real = self.discriminator(imgs)
                     disc_fake = self.discriminator(decoded_images)
 
-                    disc_factor = self.vqgan.adopt_weight(args.disc_factor, epoch*steps_per_epoch+i, threshold=args.disc_start)
+                    disc_factor = self.vq.adopt_weight(args.disc_factor, epoch*steps_per_epoch+i, threshold=args.disc_start)
 
                     #perceptual_loss = self.perceptual_loss(imgs, decoded_images)
                     rec_loss = torch.abs(imgs - decoded_images)
@@ -107,7 +110,7 @@ class TrainVQGAN:
                     perceptual_rec_loss = perceptual_rec_loss.mean()
                     g_loss = -torch.mean(disc_fake)
 
-                    λ = self.vqgan.calculate_lambda(perceptual_rec_loss, g_loss)
+                    λ = self.vq.calculate_lambda(perceptual_rec_loss, g_loss)
                     vq_loss = perceptual_rec_loss + q_loss + disc_factor * λ * g_loss
 
                     d_loss_real = torch.mean(F.relu(1. - disc_real))
@@ -130,19 +133,20 @@ class TrainVQGAN:
 
                     pbar.set_postfix(
                         VQ_Loss=np.round(vq_loss.cpu().detach().numpy().item(), 5),
-                        GAN_Loss=np.round(gan_loss.cpu().detach().numpy().item(), 3)
+                        Disc_Loss=np.round(gan_loss.cpu().detach().numpy().item(), 3)
                     )
                     pbar.update(0)
-                #torch.save(self.vqgan.state_dict(), os.path.join("checkpoints", f"vqgan_epoch_{epoch}.pt"))
+                #torch.save(self.vq.state_dict(), os.path.join("checkpoints", f"vq_epoch_{epoch}.pt"))
                 
-            self.test(args, test_dataloader, self.vqgan)
-        torch.save(self.vqgan.state_dict(), os.path.join("checkpoints", f"vqgan_epoch_{user_num}.pt"))    
+            self.test(args, test_dataloader, self.vq)
+        torch.save(self.vq.state_dict(), os.path.join("checkpoints", f"vq_epoch_{user_num}.pt"))    
     
 
-    def trainwithoutdis(self, args, user_id, total_far, total_frr, total_eer, total_f1, total_auc):
+    def trainwithoutdis(self, args, user_id, total_far, total_frr, total_eer, total_f1, total_auc, x_train, y_train, x_valid, y_valid, subjects):
         #train_dataset = load_data(args)
         #user_num = 1
-        x_train, y_train, x_valid, y_valid, x_plot, y_plot, subjects = get_mnist_con_another(cls = user_id)
+        x_train, y_train, x_valid, y_valid, subjects = get_mnist_con_augdata(user_id, x_train, y_train, x_valid, y_valid, subjects)
+        #x_train, y_train, x_valid, y_valid, subjects = get_mnist_con_noaugdata(user_id, x_train, y_train, x_valid, y_valid, subjects)
         self.subjects = subjects
         #x_train, y_train, x_valid, y_valid, x_plot, y_plot, subjects = get_mnist_con_random_attack(cls = user_num)
         #print("---------------the length is:", len(x_valid))
@@ -164,18 +168,23 @@ class TrainVQGAN:
         best_f1 = 0
         best_auc = 0
         steps_per_epoch = len(train_dataset)
+        '''
+        auroc, far, frr, eer, f1 = self.test(args, test_dataloader, self.vq)
+        print("##############################################:", auroc, far, frr, eer, f1)
+        exit(-1)
+        '''
         for epoch in tqdm(range(args.epochs), desc="total epoch"):
             with tqdm(range(len(train_dataset))) as pbar:
                 for i, (imgs,_) in zip(pbar, train_dataset):
                     imgs = imgs.type(torch.FloatTensor)
                     imgs = imgs.to(device=args.device)
-                    decoded_images, _, q_loss = self.vqgan(imgs)
+                    decoded_images, _, q_loss = self.vq(imgs)
                     #print("#######################", decoded_images.size(), imgs.size())
                     '''
                     disc_real = self.discriminator(imgs)
                     disc_fake = self.discriminator(decoded_images)
 
-                    disc_factor = self.vqgan.adopt_weight(args.disc_factor, epoch*steps_per_epoch+i, threshold=args.disc_start)
+                    disc_factor = self.vq.adopt_weight(args.disc_factor, epoch*steps_per_epoch+i, threshold=args.disc_start)
                     '''
 
                     #perceptual_loss = self.perceptual_loss(imgs, decoded_images)
@@ -185,7 +194,7 @@ class TrainVQGAN:
                     perceptual_rec_loss = perceptual_rec_loss.mean()
                     #g_loss = -torch.mean(disc_fake)
 
-                    #λ = self.vqgan.calculate_lambda(perceptual_rec_loss, g_loss)
+                    #λ = self.vq.calculate_lambda(perceptual_rec_loss, g_loss)
                     vq_loss = perceptual_rec_loss + q_loss# + disc_factor * λ * g_loss
 
                     '''
@@ -194,7 +203,7 @@ class TrainVQGAN:
                     gan_loss = disc_factor * 0.5*(d_loss_real + d_loss_fake)
                     '''
                     self.opt_vq.zero_grad()
-                    vq_loss.sum().backward(retain_graph=True)
+                    vq_loss.backward(retain_graph=True)
                     #vq_loss.backward()
                     '''
                     self.opt_disc.zero_grad()
@@ -210,28 +219,28 @@ class TrainVQGAN:
                     '''
                     pbar.set_postfix(
                         VQ_Loss=np.round(vq_loss.mean().cpu().detach().numpy().item(), 5),
-                        GAN_Loss=0
+                        Disc_Loss=0
                     )
                     pbar.update(0)
-                #torch.save(self.vqgan.state_dict(), os.path.join("checkpoints", f"vqgan_epoch_{epoch}.pt"))
-                
-            auroc, far, frr, eer, f1 = self.test(args, test_dataloader, self.vqgan)
-            if best_eer > eer:
-                best_far = far   
-                best_frr = frr
-                best_eer = eer
-                best_f1 = f1
-                best_auc = auroc
+                #torch.save(self.vq.state_dict(), os.path.join("checkpoints", f"vq_epoch_{epoch}.pt"))
+            if epoch+1 > 0:     
+                auroc, far, frr, eer, f1 = self.test(args, test_dataloader, self.vq)
+                if best_far > far:
+                    best_far = far   
+                    best_frr = frr
+                    best_eer = eer
+                    best_f1 = f1
+                    best_auc = auroc
         
         total_far.append(best_far)
         total_frr.append(best_frr)
         total_eer.append(best_eer)
         total_f1.append(best_f1)
         total_auc.append(best_auc)
-        torch.save(self.vqgan.state_dict(), os.path.join("checkpoints", f"vqgan_epoch_{user_id}.pt"))    
+        torch.save(self.vq.state_dict(), os.path.join("checkpoints", f"vq_epoch_{user_id}.pt"))    
             
 
-    def test(self, args, testloader, vqgan):
+    def test(self, args, testloader, vq_model):
         global best_acc
     
         batch_time = AverageMeter()
@@ -243,8 +252,8 @@ class TrainVQGAN:
         f1_score = AverageMeter()
     
         # switch to evaluate mode
-        #vqgan = vqgan.cpu()
-        vqgan.eval()
+        #vq_model = vq_model.cpu()
+        vq_model.eval()
         end = time.time()
         bar = Bar('Processing', max=len(testloader))
        
@@ -264,7 +273,7 @@ class TrainVQGAN:
             # with torch.no_grad():
             inputs, targets = torch.autograd.Variable(inputs), torch.autograd.Variable(targets)
             # compute output
-            decoded_images, _, q_loss = self.vqgan(inputs)
+            decoded_images, _, q_loss = self.vq(inputs)
             #scores = torch.abs(inputs - decoded_images).mean()
             scores = torch.mean(torch.pow((inputs - decoded_images), 2),dim=[1,2,3])
             #print("#############################:", scores.size(), targets.size())
@@ -363,15 +372,18 @@ class TrainVQGAN:
         
         return top1.avg, far.avg, frr.avg, eer.avg, f1_score.avg
 
+
+
+
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="VQGAN")
+    parser = argparse.ArgumentParser(description="VQ autoencoder training (optional discriminator)")
     parser.add_argument('--latent-dim', type=int, default=256, help='Latent dimension n_z (default: 256)')
     parser.add_argument('--image-size', type=int, default=32, help='Image height and width (default: 256)')
     parser.add_argument('--num-codebook-vectors', type=int, default=1024, help='Number of codebook vectors (default: 256)')
     parser.add_argument('--beta', type=float, default=0.25, help='Commitment loss scalar (default: 0.25)')
     parser.add_argument('--image-channels', type=int, default=1, help='Number of channels of images (default: 3)')
     parser.add_argument('--dataset-path', type=str, default='/data', help='Path to data (default: /data)')
-    parser.add_argument('--device', type=str, default="cuda", help='Which device the training is on')
+    parser.add_argument('--device', type=str, default="cuda:0", help='Which device the training is on')
     parser.add_argument('--batch-size', type=int, default=16, help='Input batch size for training (default: 6)')
     parser.add_argument('--epochs', type=int, default=50, help='Number of epochs to train (default: 50)')
     parser.add_argument('--learning-rate', type=float, default=2.25e-05, help='Learning rate (default: 0.0002)')
@@ -385,26 +397,28 @@ if __name__ == '__main__':
     args = parser.parse_args()
     #args.dataset_path = r"C:\Users\dome\datasets\flowers"
     #torch.distributed.init_process_group(backend="nccl")
-    total_far = []
-    total_frr = []
-    total_err = []
-    total_f1 = []
-    total_auc = []
-    index = []
-    data = pd.DataFrame(columns=['user_id','far', 'frr', 'err', 'f1_score', 'auc'])
-    for i in tqdm(range(90), desc="total user"):
+    
+    x_train, y_train, x_valid, y_valid, subjects = read_data()
+    for i in tqdm(range(10), desc="total user"):
+        total_far = []
+        total_frr = []
+        total_err = []
+        total_f1 = []
+        total_auc = []
+        index = []
+        data = pd.DataFrame(columns=['user_id','far', 'frr', 'err', 'f1_score', 'auc'])
         user_id = i
-        train_vqgan = TrainVQGAN(args, user_id, total_far, total_frr, total_err, total_f1, total_auc)
-        index.append(train_vqgan.subjects[user_id])
+        train_vq = TrainVQAutoencoder(args, user_id, total_far, total_frr, total_err, total_f1, total_auc, x_train, y_train, x_valid, y_valid, subjects)
+        index.append(train_vq.subjects[user_id])
 
 
-    data['user_id'] = index
-    data['far'] = total_far
-    data['frr'] = total_frr
-    data['err'] = total_err
-    data['f1_score'] = total_f1
-    data['auc'] = total_auc
-    data.to_csv('./experiment_results/hmog-nobustrobust-16.csv', sep=',', header=True, index=False,mode='a')
+        data['user_id'] = index
+        data['far'] = total_far
+        data['frr'] = total_frr
+        data['err'] = total_err
+        data['f1_score'] = total_f1
+        data['auc'] = total_auc
+        data.to_csv('./experiment_results/hmog-robust-nocenter-new-noaugment-16.csv', sep=',', header=True, index=False,mode='a')
 
 
 

@@ -1,3 +1,5 @@
+"""HMOG VQ -> tokens -> Transformer (LM) experiments."""
+
 import argparse
 import csv
 import json
@@ -34,7 +36,7 @@ from hmog_data import (
 from hmog_metrics import compute_metrics
 from hmog_token_transformer import build_token_lm
 from hmog_tokenizer import encode_windows_to_tokens
-from vqgan import VQGAN
+from vq_autoencoder import VQAutoencoder
 
 
 logger = logging.getLogger(__name__)
@@ -50,8 +52,8 @@ def set_seed(seed: int, cuda: bool = False) -> None:
 
 def setup_logging(log_dir: Path) -> Tuple[Path, Path]:
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "hmog_vqgan_token_transformer.log"
-    metrics_txt = log_dir / "hmog_vqgan_token_transformer_metrics.txt"
+    log_file = log_dir / "hmog_vq_token_transformer.log"
+    metrics_txt = log_dir / "hmog_vq_token_transformer_metrics.txt"
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
@@ -159,7 +161,7 @@ def build_loaders(
     return train_loader, val_loader, test_loader
 
 
-def vqgan_reconstruction_step(
+def vq_reconstruction_step(
     model: nn.Module,
     batch: torch.Tensor,
     device: torch.device,
@@ -184,7 +186,7 @@ def vqgan_reconstruction_step(
 
 
 @torch.no_grad()
-def evaluate_vqgan(
+def evaluate_vq(
     model: nn.Module,
     loader: DataLoader,
     device: torch.device,
@@ -338,7 +340,7 @@ def _iter_eval_windows_from_csv_with_caps(
 
 @torch.no_grad()
 def score_lm_from_csv_to_arrays(
-    vqgan: nn.Module,
+    vq: nn.Module,
     lm: nn.Module,
     *,
     csv_path: Path,
@@ -352,7 +354,7 @@ def score_lm_from_csv_to_arrays(
     max_total: Optional[int] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
     """
-    Stream windows from CSV -> VQGAN tokens -> LM score, producing aligned arrays:
+    Stream windows from CSV -> VQ tokens -> LM score, producing aligned arrays:
       - session_ids: int32, increments when (subject, session) changes
       - labels: int8, 1=genuine (subject==target_user), 0=impostor
       - scores: float32, -NLL per window (larger => more genuine)
@@ -380,7 +382,7 @@ def score_lm_from_csv_to_arrays(
             return
         windows_np = np.stack(batch_windows, axis=0).astype(np.float32, copy=False)
         tok = encode_windows_to_tokens(
-            vqgan, windows_np, batch_size=int(token_batch_size), device=device, use_amp=use_amp
+            vq, windows_np, batch_size=int(token_batch_size), device=device, use_amp=use_amp
         )
         tokens = torch.from_numpy(tok.tokens).to(device=device, dtype=torch.long, non_blocking=True)
         with amp.autocast(device_type=device.type, enabled=use_amp):
@@ -452,7 +454,7 @@ def score_lm_from_csv_to_arrays(
 
 @torch.no_grad()
 def collect_lm_scores_from_csv(
-    vqgan: nn.Module,
+    vq: nn.Module,
     lm: nn.Module,
     *,
     csv_path: Path,
@@ -466,7 +468,7 @@ def collect_lm_scores_from_csv(
     use_amp: bool,
 ) -> Tuple[List[Tuple[str, str, int, float]], float]:
     """
-    Stream windows from CSV -> VQGAN tokens -> LM score, keeping (subject, session, label, score).
+    Stream windows from CSV -> VQ tokens -> LM score, keeping (subject, session, label, score).
 
     Returns:
       - scored_windows: list of tuples in chronological order.
@@ -483,7 +485,7 @@ def collect_lm_scores_from_csv(
             return
         windows_np = np.stack(batch_windows, axis=0).astype(np.float32, copy=False)
         tok = encode_windows_to_tokens(
-            vqgan, windows_np, batch_size=int(token_batch_size), device=device, use_amp=use_amp
+            vq, windows_np, batch_size=int(token_batch_size), device=device, use_amp=use_amp
         )
         tokens = torch.from_numpy(tok.tokens).to(device=device, dtype=torch.long, non_blocking=True)
         with amp.autocast(device_type=device.type, enabled=use_amp):
@@ -608,9 +610,9 @@ def _token_cache_path(token_cache_dir: Path, *, user_id: str, window_size: float
 def load_token_cache(
     cache_path: Path,
     *,
-    expected_vqgan_ckpt: str,
-    expected_vqgan_ckpt_mtime_ns: int,
-    expected_vqgan_ckpt_size: int,
+    expected_vq_ckpt: str,
+    expected_vq_ckpt_mtime_ns: int,
+    expected_vq_ckpt_size: int,
     expected_num_codebook_vectors: int,
     expected_target_width: int,
     expected_seed: int,
@@ -620,14 +622,14 @@ def load_token_cache(
         return None
     try:
         with np.load(cache_path, allow_pickle=False) as data:
-            vqgan_ckpt = str(data["vqgan_ckpt"].item())
-            if vqgan_ckpt != expected_vqgan_ckpt:
+            vq_ckpt = str(data["vq_ckpt"].item())
+            if vq_ckpt != expected_vq_ckpt:
                 return None
-            cached_mtime_ns = int(data["vqgan_ckpt_mtime_ns"].item()) if "vqgan_ckpt_mtime_ns" in data else -1
-            cached_size = int(data["vqgan_ckpt_size"].item()) if "vqgan_ckpt_size" in data else -1
-            if int(cached_mtime_ns) != int(expected_vqgan_ckpt_mtime_ns):
+            cached_mtime_ns = int(data["vq_ckpt_mtime_ns"].item()) if "vq_ckpt_mtime_ns" in data else -1
+            cached_size = int(data["vq_ckpt_size"].item()) if "vq_ckpt_size" in data else -1
+            if int(cached_mtime_ns) != int(expected_vq_ckpt_mtime_ns):
                 return None
-            if int(cached_size) != int(expected_vqgan_ckpt_size):
+            if int(cached_size) != int(expected_vq_ckpt_size):
                 return None
             if int(data["num_codebook_vectors"].item()) != int(expected_num_codebook_vectors):
                 return None
@@ -653,9 +655,9 @@ def save_token_cache(
     *,
     tokens: np.ndarray,
     codebook_hw: Tuple[int, int],
-    vqgan_ckpt: str,
-    vqgan_ckpt_mtime_ns: int,
-    vqgan_ckpt_size: int,
+    vq_ckpt: str,
+    vq_ckpt_mtime_ns: int,
+    vq_ckpt_size: int,
     num_codebook_vectors: int,
     target_width: int,
     seed: int,
@@ -665,9 +667,9 @@ def save_token_cache(
         cache_path,
         tokens=tokens.astype(np.int64, copy=False),
         codebook_hw=np.asarray(codebook_hw, dtype=np.int32),
-        vqgan_ckpt=str(vqgan_ckpt),
-        vqgan_ckpt_mtime_ns=int(vqgan_ckpt_mtime_ns),
-        vqgan_ckpt_size=int(vqgan_ckpt_size),
+        vq_ckpt=str(vq_ckpt),
+        vq_ckpt_mtime_ns=int(vq_ckpt_mtime_ns),
+        vq_ckpt_size=int(vq_ckpt_size),
         num_codebook_vectors=int(num_codebook_vectors),
         target_width=int(target_width),
         seed=int(seed),
@@ -841,24 +843,24 @@ def run_single_window(
 
     ckpt_dir = Path(args.output_dir) / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-    vqgan_ckpt_path = ckpt_dir / f"vqgan_user_{user_id}_ws_{window_size:.1f}.pt"
+    vq_ckpt_path = ckpt_dir / f"vq_user_{user_id}_ws_{window_size:.1f}.pt"
     lm_ckpt_path = ckpt_dir / f"token_gpt_user_{user_id}_ws_{window_size:.1f}.pt"
 
     # -----------------------------
-    # Stage 1: Train (or load) VQGAN
+    # Stage 1: Train (or load) VQ autoencoder
     # -----------------------------
-    vqgan_trained_epochs = 0
-    vqgan_best_epoch = 0
-    vqgan = VQGAN(args).to(device)
-    if args.reuse_vqgan and vqgan_ckpt_path.exists():
-        vqgan.load_state_dict(torch.load(vqgan_ckpt_path, map_location=device))
-        logger.info("[VQGAN] reuse checkpoint %s", vqgan_ckpt_path)
-        cfg_path = vqgan_ckpt_path.with_suffix(".json")
+    vq_trained_epochs = 0
+    vq_best_epoch = 0
+    vq = VQAutoencoder(args).to(device)
+    if args.reuse_vq and vq_ckpt_path.exists():
+        vq.load_state_dict(torch.load(vq_ckpt_path, map_location=device))
+        logger.info("[VQ] reuse checkpoint %s", vq_ckpt_path)
+        cfg_path = vq_ckpt_path.with_suffix(".json")
         if cfg_path.exists():
             try:
                 cfg_payload = json.loads(cfg_path.read_text(encoding="utf-8"))
-                vqgan_trained_epochs = int(cfg_payload.get("trained_epochs", 0) or 0)
-                vqgan_best_epoch = int(cfg_payload.get("best_epoch", 0) or 0)
+                vq_trained_epochs = int(cfg_payload.get("trained_epochs", 0) or 0)
+                vq_best_epoch = int(cfg_payload.get("best_epoch", 0) or 0)
             except Exception:
                 pass
         else:
@@ -877,8 +879,8 @@ def run_single_window(
                         "input_width": int(args.input_width),
                         "target_width": int(target_width),
                         "window_size": float(window_size),
-                        "trained_epochs": int(vqgan_trained_epochs),
-                        "best_epoch": int(vqgan_best_epoch),
+                        "trained_epochs": int(vq_trained_epochs),
+                        "best_epoch": int(vq_best_epoch),
                         "early_stop_patience": int(getattr(args, "early_stop_patience", 0) or 0),
                     },
                     f,
@@ -887,10 +889,10 @@ def run_single_window(
                 )
     else:
         optimizer = torch.optim.AdamW(
-            params=vqgan.parameters(),
-            lr=args.vqgan_lr,
+            params=vq.parameters(),
+            lr=args.vq_lr,
             betas=(args.beta1, args.beta2),
-            weight_decay=float(args.vqgan_weight_decay),
+            weight_decay=float(args.vq_weight_decay),
         )
         scaler = amp.GradScaler(device.type, enabled=args.use_amp)
         early_stop_patience = int(getattr(args, "early_stop_patience", 0) or 0)
@@ -899,15 +901,15 @@ def run_single_window(
         best_epoch = 0
         best_state: Optional[Dict[str, torch.Tensor]] = None
         no_improve = 0
-        vqgan_trained_epochs = 0
+        vq_trained_epochs = 0
 
-        for epoch in range(int(args.vqgan_epochs)):
-            vqgan.train()
-            pbar = tqdm(train_loader, desc=f"VQGAN user={user_id} ws={window_size:.1f} epoch={epoch+1}/{args.vqgan_epochs}")
+        for epoch in range(int(args.vq_epochs)):
+            vq.train()
+            pbar = tqdm(train_loader, desc=f"VQ user={user_id} ws={window_size:.1f} epoch={epoch+1}/{args.vq_epochs}")
             for batch, _ in pbar:
                 optimizer.zero_grad(set_to_none=True)
-                loss, rec_loss, q_loss = vqgan_reconstruction_step(
-                    vqgan,
+                loss, rec_loss, q_loss = vq_reconstruction_step(
+                    vq,
                     batch,
                     device,
                     args.use_amp,
@@ -918,18 +920,18 @@ def run_single_window(
                 scaler.scale(loss).backward()
                 if args.grad_clip_norm and args.grad_clip_norm > 0:
                     scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(vqgan.parameters(), float(args.grad_clip_norm))
+                    torch.nn.utils.clip_grad_norm_(vq.parameters(), float(args.grad_clip_norm))
                 scaler.step(optimizer)
                 scaler.update()
                 pbar.set_postfix(loss=f"{loss.item():.4f}", rec=f"{rec_loss.item():.4f}", q=f"{q_loss.item():.4f}")
 
-            vqgan_trained_epochs = int(epoch + 1)
+            vq_trained_epochs = int(epoch + 1)
 
-            should_eval = bool(early_stop_enabled) or bool(args.vqgan_val_interval and (epoch + 1) % int(args.vqgan_val_interval) == 0)
+            should_eval = bool(early_stop_enabled) or bool(args.vq_val_interval and (epoch + 1) % int(args.vq_val_interval) == 0)
             if should_eval:
-                val_metrics, val_latency = evaluate_vqgan(vqgan, val_loader, device, args.use_amp, score_metric=args.score_metric)
+                val_metrics, val_latency = evaluate_vq(vq, val_loader, device, args.use_amp, score_metric=args.score_metric)
                 payload = {
-                    "stage": "vqgan-val",
+                    "stage": "vq-val",
                     "user": user_id,
                     "window": window_size,
                     "epoch": epoch + 1,
@@ -938,7 +940,7 @@ def run_single_window(
                 }
                 save_jsonl(json_log_path, payload)
                 save_text_log(text_log_path, payload)
-                logger.info("[VQGAN][VAL] user=%s ws=%.1f epoch=%d metrics=%s", user_id, window_size, epoch + 1, val_metrics)
+                logger.info("[VQ][VAL] user=%s ws=%.1f epoch=%d metrics=%s", user_id, window_size, epoch + 1, val_metrics)
 
                 if early_stop_enabled:
                     auc = float(val_metrics.get("auc", 0.0) or 0.0)
@@ -946,14 +948,14 @@ def run_single_window(
                         best_auc = auc
                         best_epoch = int(epoch + 1)
                         # Store a CPU snapshot to avoid doubling GPU memory usage.
-                        best_state = {k: v.detach().cpu().clone() for k, v in vqgan.state_dict().items()}
+                        best_state = {k: v.detach().cpu().clone() for k, v in vq.state_dict().items()}
                         no_improve = 0
                     else:
                         no_improve += 1
 
                     if no_improve >= int(early_stop_patience):
                         logger.info(
-                            "[VQGAN][EARLY-STOP] user=%s ws=%.1f stop at epoch=%d (best_epoch=%d best_auc=%.6f)",
+                            "[VQ][EARLY-STOP] user=%s ws=%.1f stop at epoch=%d (best_epoch=%d best_auc=%.6f)",
                             user_id,
                             window_size,
                             int(epoch + 1),
@@ -963,21 +965,21 @@ def run_single_window(
                         break
 
         if early_stop_enabled and best_state is not None:
-            vqgan.load_state_dict({k: v.to(device=device) for k, v in best_state.items()})
+            vq.load_state_dict({k: v.to(device=device) for k, v in best_state.items()})
             logger.info(
-                "[VQGAN][EARLY-STOP] user=%s ws=%.1f restore best_epoch=%d best_auc=%.6f (trained_epochs=%d)",
+                "[VQ][EARLY-STOP] user=%s ws=%.1f restore best_epoch=%d best_auc=%.6f (trained_epochs=%d)",
                 user_id,
                 window_size,
                 int(best_epoch),
                 float(best_auc),
-                int(vqgan_trained_epochs),
+                int(vq_trained_epochs),
             )
-            vqgan_best_epoch = int(best_epoch)
+            vq_best_epoch = int(best_epoch)
         else:
-            vqgan_best_epoch = int(vqgan_trained_epochs)
+            vq_best_epoch = int(vq_trained_epochs)
 
-        torch.save(vqgan.state_dict(), vqgan_ckpt_path)
-        with (vqgan_ckpt_path.with_suffix(".json")).open("w") as f:
+        torch.save(vq.state_dict(), vq_ckpt_path)
+        with (vq_ckpt_path.with_suffix(".json")).open("w") as f:
             json.dump(
                 {
                     "base_channels": int(args.base_channels),
@@ -990,36 +992,36 @@ def run_single_window(
                     "input_width": int(args.input_width),
                     "target_width": int(target_width),
                     "window_size": float(window_size),
-                    "trained_epochs": int(vqgan_trained_epochs),
-                    "best_epoch": int(vqgan_best_epoch),
+                    "trained_epochs": int(vq_trained_epochs),
+                    "best_epoch": int(vq_best_epoch),
                     "early_stop_patience": int(early_stop_patience),
                 },
                 f,
                 indent=2,
                 ensure_ascii=False,
             )
-        logger.info("[VQGAN] saved checkpoint %s", vqgan_ckpt_path)
+        logger.info("[VQ] saved checkpoint %s", vq_ckpt_path)
 
-    # Final VQGAN baseline metrics
+    # Final VQ baseline metrics
     #
     # In full-eval mode we avoid loading full val/test window tensors in memory.
     # We therefore skip baseline metrics here (pos/neg will be 0, clearly signaling "not evaluated").
     if full_eval:
-        vqgan_val_metrics = compute_metrics(np.empty((0,), dtype=np.int32), np.empty((0,), dtype=np.float64))
-        vqgan_test_metrics = compute_metrics(np.empty((0,), dtype=np.int32), np.empty((0,), dtype=np.float64))
-        vqgan_val_latency = 0.0
-        vqgan_test_latency = 0.0
-        logger.info("[VQGAN][SKIP] full_eval enabled; skip baseline val/test metrics")
+        vq_val_metrics = compute_metrics(np.empty((0,), dtype=np.int32), np.empty((0,), dtype=np.float64))
+        vq_test_metrics = compute_metrics(np.empty((0,), dtype=np.int32), np.empty((0,), dtype=np.float64))
+        vq_val_latency = 0.0
+        vq_test_latency = 0.0
+        logger.info("[VQ][SKIP] full_eval enabled; skip baseline val/test metrics")
     else:
-        vqgan_val_metrics, vqgan_val_latency = evaluate_vqgan(
-            vqgan, val_loader, device, args.use_amp, score_metric=args.score_metric
+        vq_val_metrics, vq_val_latency = evaluate_vq(
+            vq, val_loader, device, args.use_amp, score_metric=args.score_metric
         )
-        vqgan_test_metrics, vqgan_test_latency = evaluate_vqgan(
-            vqgan,
+        vq_test_metrics, vq_test_latency = evaluate_vq(
+            vq,
             test_loader,
             device,
             args.use_amp,
-            threshold=float(vqgan_val_metrics.get("threshold", 0.0)),
+            threshold=float(vq_val_metrics.get("threshold", 0.0)),
             score_metric=args.score_metric,
         )
 
@@ -1027,15 +1029,15 @@ def run_single_window(
     # Stage 2: Tokenize splits
     # -----------------------------
     token_cache_dir = Path(args.token_cache_dir)
-    expected_vqgan_ckpt = str(vqgan_ckpt_path)
-    ckpt_stat = vqgan_ckpt_path.stat()
-    expected_vqgan_ckpt_mtime_ns = int(getattr(ckpt_stat, "st_mtime_ns", int(ckpt_stat.st_mtime * 1e9)))
-    expected_vqgan_ckpt_size = int(ckpt_stat.st_size)
+    expected_vq_ckpt = str(vq_ckpt_path)
+    ckpt_stat = vq_ckpt_path.stat()
+    expected_vq_ckpt_mtime_ns = int(getattr(ckpt_stat, "st_mtime_ns", int(ckpt_stat.st_mtime * 1e9)))
+    expected_vq_ckpt_size = int(ckpt_stat.st_size)
     cached = load_token_cache(
         _token_cache_path(token_cache_dir, user_id=user_id, window_size=window_size, split="train"),
-        expected_vqgan_ckpt=expected_vqgan_ckpt,
-        expected_vqgan_ckpt_mtime_ns=expected_vqgan_ckpt_mtime_ns,
-        expected_vqgan_ckpt_size=expected_vqgan_ckpt_size,
+        expected_vq_ckpt=expected_vq_ckpt,
+        expected_vq_ckpt_mtime_ns=expected_vq_ckpt_mtime_ns,
+        expected_vq_ckpt_size=expected_vq_ckpt_size,
         expected_num_codebook_vectors=args.num_codebook_vectors,
         expected_target_width=target_width,
         expected_seed=args.seed,
@@ -1043,7 +1045,7 @@ def run_single_window(
     )
     if cached is None:
         train_tok = encode_windows_to_tokens(
-            vqgan,
+            vq,
             train_x,
             batch_size=args.token_batch_size,
             device=device,
@@ -1054,9 +1056,9 @@ def run_single_window(
             _token_cache_path(token_cache_dir, user_id=user_id, window_size=window_size, split="train"),
             tokens=train_tok.tokens,
             codebook_hw=train_tok.codebook_hw,
-            vqgan_ckpt=expected_vqgan_ckpt,
-            vqgan_ckpt_mtime_ns=expected_vqgan_ckpt_mtime_ns,
-            vqgan_ckpt_size=expected_vqgan_ckpt_size,
+            vq_ckpt=expected_vq_ckpt,
+            vq_ckpt_mtime_ns=expected_vq_ckpt_mtime_ns,
+            vq_ckpt_size=expected_vq_ckpt_size,
             num_codebook_vectors=args.num_codebook_vectors,
             target_width=target_width,
             seed=args.seed,
@@ -1075,9 +1077,9 @@ def run_single_window(
     else:
         val_cached = load_token_cache(
             _token_cache_path(token_cache_dir, user_id=user_id, window_size=window_size, split="val"),
-            expected_vqgan_ckpt=expected_vqgan_ckpt,
-            expected_vqgan_ckpt_mtime_ns=expected_vqgan_ckpt_mtime_ns,
-            expected_vqgan_ckpt_size=expected_vqgan_ckpt_size,
+            expected_vq_ckpt=expected_vq_ckpt,
+            expected_vq_ckpt_mtime_ns=expected_vq_ckpt_mtime_ns,
+            expected_vq_ckpt_size=expected_vq_ckpt_size,
             expected_num_codebook_vectors=args.num_codebook_vectors,
             expected_target_width=target_width,
             expected_seed=args.seed,
@@ -1085,7 +1087,7 @@ def run_single_window(
         )
         if val_cached is None:
             val_tok = encode_windows_to_tokens(
-                vqgan,
+                vq,
                 val_x,
                 batch_size=args.token_batch_size,
                 device=device,
@@ -1096,9 +1098,9 @@ def run_single_window(
                 _token_cache_path(token_cache_dir, user_id=user_id, window_size=window_size, split="val"),
                 tokens=val_tok.tokens,
                 codebook_hw=val_tok.codebook_hw,
-                vqgan_ckpt=expected_vqgan_ckpt,
-                vqgan_ckpt_mtime_ns=expected_vqgan_ckpt_mtime_ns,
-                vqgan_ckpt_size=expected_vqgan_ckpt_size,
+                vq_ckpt=expected_vq_ckpt,
+                vq_ckpt_mtime_ns=expected_vq_ckpt_mtime_ns,
+                vq_ckpt_size=expected_vq_ckpt_size,
                 num_codebook_vectors=args.num_codebook_vectors,
                 target_width=target_width,
                 seed=args.seed,
@@ -1109,9 +1111,9 @@ def run_single_window(
 
         test_cached = load_token_cache(
             _token_cache_path(token_cache_dir, user_id=user_id, window_size=window_size, split="test"),
-            expected_vqgan_ckpt=expected_vqgan_ckpt,
-            expected_vqgan_ckpt_mtime_ns=expected_vqgan_ckpt_mtime_ns,
-            expected_vqgan_ckpt_size=expected_vqgan_ckpt_size,
+            expected_vq_ckpt=expected_vq_ckpt,
+            expected_vq_ckpt_mtime_ns=expected_vq_ckpt_mtime_ns,
+            expected_vq_ckpt_size=expected_vq_ckpt_size,
             expected_num_codebook_vectors=args.num_codebook_vectors,
             expected_target_width=target_width,
             expected_seed=args.seed,
@@ -1119,7 +1121,7 @@ def run_single_window(
         )
         if test_cached is None:
             test_tok = encode_windows_to_tokens(
-                vqgan,
+                vq,
                 test_x,
                 batch_size=args.token_batch_size,
                 device=device,
@@ -1130,9 +1132,9 @@ def run_single_window(
                 _token_cache_path(token_cache_dir, user_id=user_id, window_size=window_size, split="test"),
                 tokens=test_tok.tokens,
                 codebook_hw=test_tok.codebook_hw,
-                vqgan_ckpt=expected_vqgan_ckpt,
-                vqgan_ckpt_mtime_ns=expected_vqgan_ckpt_mtime_ns,
-                vqgan_ckpt_size=expected_vqgan_ckpt_size,
+                vq_ckpt=expected_vq_ckpt,
+                vq_ckpt_mtime_ns=expected_vq_ckpt_mtime_ns,
+                vq_ckpt_size=expected_vq_ckpt_size,
                 num_codebook_vectors=args.num_codebook_vectors,
                 target_width=target_width,
                 seed=args.seed,
@@ -1191,12 +1193,12 @@ def run_single_window(
                 cfg_payload = json.loads(cfg_path.read_text(encoding="utf-8"))
             except Exception:
                 cfg_payload = {}
-            cfg_vqgan_ckpt = str(cfg_payload.get("vqgan_ckpt", ""))
-            cfg_mtime = int(cfg_payload.get("vqgan_ckpt_mtime_ns", -1))
-            cfg_size = int(cfg_payload.get("vqgan_ckpt_size", -1))
-            if cfg_vqgan_ckpt != expected_vqgan_ckpt:
+            cfg_vq_ckpt = str(cfg_payload.get("vq_ckpt", ""))
+            cfg_mtime = int(cfg_payload.get("vq_ckpt_mtime_ns", -1))
+            cfg_size = int(cfg_payload.get("vq_ckpt_size", -1))
+            if cfg_vq_ckpt != expected_vq_ckpt:
                 reuse_lm = False
-            if cfg_mtime != int(expected_vqgan_ckpt_mtime_ns) or cfg_size != int(expected_vqgan_ckpt_size):
+            if cfg_mtime != int(expected_vq_ckpt_mtime_ns) or cfg_size != int(expected_vq_ckpt_size):
                 reuse_lm = False
             if reuse_lm:
                 try:
@@ -1310,9 +1312,9 @@ def run_single_window(
             payload = dict(lm_cfg.__dict__)
             payload.update(
                 {
-                    "vqgan_ckpt": str(expected_vqgan_ckpt),
-                    "vqgan_ckpt_mtime_ns": int(expected_vqgan_ckpt_mtime_ns),
-                    "vqgan_ckpt_size": int(expected_vqgan_ckpt_size),
+                    "vq_ckpt": str(expected_vq_ckpt),
+                    "vq_ckpt_mtime_ns": int(expected_vq_ckpt_mtime_ns),
+                    "vq_ckpt_size": int(expected_vq_ckpt_size),
                     "target_width": int(target_width),
                     "window_size": float(window_size),
                     "trained_epochs": int(lm_trained_epochs),
@@ -1352,7 +1354,7 @@ def run_single_window(
             max_total = int(args.max_eval_per_split) if int(args.max_eval_per_split or 0) > 0 else None
 
         val_session_ids, val_labels_raw, val_scores_raw, lm_val_latency = score_lm_from_csv_to_arrays(
-            vqgan,
+            vq,
             lm,
             csv_path=val_csv,
             target_user=user_id,
@@ -1365,7 +1367,7 @@ def run_single_window(
             max_total=max_total,
         )
         test_session_ids, test_labels_raw, test_scores_raw, lm_test_latency = score_lm_from_csv_to_arrays(
-            vqgan,
+            vq,
             lm,
             csv_path=test_csv,
             target_user=user_id,
@@ -1473,8 +1475,8 @@ def run_single_window(
         )
 
     stages: List[Tuple[str, Dict[str, float], float]] = [
-        ("vqgan-val", vqgan_val_metrics, vqgan_val_latency),
-        ("vqgan-test", vqgan_test_metrics, vqgan_test_latency),
+        ("vq-val", vq_val_metrics, vq_val_latency),
+        ("vq-test", vq_test_metrics, vq_test_latency),
         ("lm-val", lm_val_metrics, lm_val_latency),
         ("lm-test", lm_test_metrics, lm_test_latency),
     ]
@@ -1484,8 +1486,8 @@ def run_single_window(
         stages.append(("lock-test", lmseq_test_metrics, float(lmseq_test_latency)))
 
     for stage, metrics, latency in stages:
-        stage_thr_strategy = "eer" if stage.startswith("vqgan") else str(args.threshold_strategy)
-        stage_epoch = int(vqgan_trained_epochs) if stage.startswith("vqgan") else int(lm_trained_epochs)
+        stage_thr_strategy = "eer" if stage.startswith("vq") else str(args.threshold_strategy)
+        stage_epoch = int(vq_trained_epochs) if stage.startswith("vq") else int(lm_trained_epochs)
         payload = {
             "stage": stage,
             "user": user_id,
@@ -1523,12 +1525,12 @@ def run_single_window(
         "interrupt_min_k": int(interrupt_min_k),
         "interrupt_stride_sec": float(stride_sec),
         "interrupt_time_sec": float(interrupt_time_sec),
-        "vqgan": {
-            "val": vqgan_val_metrics,
-            "test": vqgan_test_metrics,
-            "checkpoint": str(vqgan_ckpt_path),
-            "trained_epochs": int(vqgan_trained_epochs),
-            "best_epoch": int(vqgan_best_epoch),
+        "vq": {
+            "val": vq_val_metrics,
+            "test": vq_test_metrics,
+            "checkpoint": str(vq_ckpt_path),
+            "trained_epochs": int(vq_trained_epochs),
+            "best_epoch": int(vq_best_epoch),
         },
         "lm": {
             "config": lm_cfg.__dict__,
@@ -1549,7 +1551,7 @@ def run_single_window(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="HMOG VQGAN -> Token -> Transformer(LM) window sweep")
+    parser = argparse.ArgumentParser(description="HMOG VQ -> Token -> Transformer(LM) window sweep")
     parser.add_argument("--dataset-path", type=str, default="/data/code/server/data_storage/processed_data/window")
     parser.add_argument("--users", nargs="*", help="Train only the specified user IDs; default iterates all user directories.")
     parser.add_argument("--window-sizes", nargs="*", type=float, default=list(WINDOW_SIZES))
@@ -1577,7 +1579,7 @@ def parse_args() -> argparse.Namespace:
         ),
     )
 
-    # VQGAN config
+    # VQ (vector-quantized autoencoder) config
     parser.add_argument("--base-channels", type=int, default=96)
     parser.add_argument("--latent-dim", type=int, default=256)
     parser.add_argument("--num-codebook-vectors", type=int, default=512)
@@ -1589,13 +1591,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--score-metric", choices=["mse", "l1"], default="mse")
     parser.add_argument("--input-noise-std", type=float, default=0.0)
     parser.add_argument("--grad-clip-norm", type=float, default=0.0)
-    parser.add_argument("--vqgan-epochs", type=int, default=1, help="Max VQGAN training epochs (may stop early due to --early-stop-patience).")
-    parser.add_argument("--vqgan-val-interval", type=int, default=0)
-    parser.add_argument("--vqgan-lr", type=float, default=2.5e-4)
-    parser.add_argument("--vqgan-weight-decay", type=float, default=0.0)
+    parser.add_argument("--vq-epochs", dest="vq_epochs", type=int, default=1, help="Max VQ training epochs (may stop early due to --early-stop-patience).")
+    parser.add_argument("--vq-val-interval", dest="vq_val_interval", type=int, default=0)
+    parser.add_argument("--vq-lr", dest="vq_lr", type=float, default=2.5e-4)
+    parser.add_argument("--vq-weight-decay", dest="vq_weight_decay", type=float, default=0.0)
     parser.add_argument("--beta1", type=float, default=0.5)
     parser.add_argument("--beta2", type=float, default=0.9)
-    parser.add_argument("--reuse-vqgan", action="store_true", help="If a checkpoint exists, skip VQGAN training.")
+    parser.add_argument("--reuse-vq", dest="reuse_vq", action="store_true", help="If a checkpoint exists, skip VQ training.")
 
     # Tokenization
     parser.add_argument("--token-cache-dir", type=str, default=str(Path(__file__).parent / "token_caches"))
@@ -1619,7 +1621,7 @@ def parse_args() -> argparse.Namespace:
         "--early-stop-patience",
         type=int,
         default=3,
-        help="Early stopping: stop if validation performance does not improve for P checks (0 disables; applies to VQGAN/LM).",
+        help="Early stopping: stop if validation performance does not improve for P checks (0 disables; applies to VQ/LM).",
     )
 
     # Threshold selection (on val), applied to test.
@@ -1733,7 +1735,7 @@ def main() -> None:
     if getattr(args, "target_session_frr", None) is not None and float(args.target_window_frr or 0.0) == 0.0:
         args.target_window_frr = float(args.target_session_frr)
     _, metrics_txt = setup_logging(Path(args.log_dir))
-    json_log_path = Path(args.log_dir) / "hmog_vqgan_token_transformer.jsonl"
+    json_log_path = Path(args.log_dir) / "hmog_vq_token_transformer.jsonl"
     text_log_path = Path(metrics_txt)
 
     torch.set_num_threads(int(args.cpu_threads))
@@ -1788,14 +1790,14 @@ def main() -> None:
             )
             all_results.append(res)
             logger.info(
-                "[DONE] user=%s ws=%.1f vqgan_auc=%.4f lm_auc=%.4f",
+                "[DONE] user=%s ws=%.1f vq_auc=%.4f lm_auc=%.4f",
                 user_id,
                 float(ws),
-                float(res["vqgan"]["test"]["auc"]),
+                float(res["vq"]["test"]["auc"]),
                 float(res["lm"]["test"]["auc"]),
             )
 
-    summary_path = Path(args.log_dir) / "hmog_vqgan_token_transformer_summary.json"
+    summary_path = Path(args.log_dir) / "hmog_vq_token_transformer_summary.json"
     with summary_path.open("w") as f:
         json.dump(all_results, f, indent=2, ensure_ascii=False)
     logger.info("[SUMMARY] saved %s", summary_path)
@@ -1850,7 +1852,7 @@ def main() -> None:
             "interrupt_min_k": picked.get("interrupt_min_k"),
             "lmseq_val": (picked.get("lmseq") or {}).get("val"),
             "lmseq_test": (picked.get("lmseq") or {}).get("test"),
-            "vqgan_checkpoint": ((picked.get("vqgan") or {}).get("checkpoint")),
+            "vq_checkpoint": ((picked.get("vq") or {}).get("checkpoint")),
             "lm_checkpoint": ((picked.get("lm") or {}).get("checkpoint")),
         }
 
@@ -1865,12 +1867,12 @@ def main() -> None:
     has_lmseq = any(((r.get("lmseq") or {}).get("test") is not None) for r in all_results)
     if has_lmseq:
         print(
-            "window\tK\tvote_N\tvote_M\tinterrupt_time_sec\tvqgan_auc\tvqgan_eer\tlm_auc\tlm_eer\t"
+            "window\tK\tvote_N\tvote_M\tinterrupt_time_sec\tvq_auc\tvq_eer\tlm_auc\tlm_eer\t"
             "lm_thr\tlm_test_frr\tlm_test_far\t"
             "lmseq_test_frr\tlmseq_test_far\tlmseq_test_err\tlmseq_test_impostor_mean_first_interrupt_sec"
         )
     else:
-        print("window\tvqgan_auc\tvqgan_eer\tlm_auc\tlm_eer")
+        print("window\tvq_auc\tvq_eer\tlm_auc\tlm_eer")
     for res in sorted(all_results, key=lambda x: float(x["window"])):
         if has_lmseq:
             lm_thr = float(((res.get("lm") or {}).get("val") or {}).get("threshold", 0.0))
@@ -1887,7 +1889,7 @@ def main() -> None:
             lmseq_test_imp_sec = float(lmseq_test.get("impostor_mean_first_interrupt_sec", 0.0) or 0.0)
             print(
                 f"{res['window']:.1f}\t{k_eff}\t{v_n}\t{v_m}\t{t_eff:.3f}\t"
-                f"{res['vqgan']['test']['auc']:.4f}\t{res['vqgan']['test']['eer']:.4f}\t"
+                f"{res['vq']['test']['auc']:.4f}\t{res['vq']['test']['eer']:.4f}\t"
                 f"{res['lm']['test']['auc']:.4f}\t{res['lm']['test']['eer']:.4f}\t"
                 f"{lm_thr:.6f}\t{lm_test_frr:.6f}\t{lm_test_far:.6f}\t"
                 f"{lmseq_test_frr:.6f}\t{lmseq_test_far:.6f}\t{lmseq_test_err:.6f}\t{lmseq_test_imp_sec:.3f}"
@@ -1895,7 +1897,7 @@ def main() -> None:
         else:
             print(
                 f"{res['window']:.1f}\t"
-                f"{res['vqgan']['test']['auc']:.4f}\t{res['vqgan']['test']['eer']:.4f}\t"
+                f"{res['vq']['test']['auc']:.4f}\t{res['vq']['test']['eer']:.4f}\t"
                 f"{res['lm']['test']['auc']:.4f}\t{res['lm']['test']['eer']:.4f}"
             )
 

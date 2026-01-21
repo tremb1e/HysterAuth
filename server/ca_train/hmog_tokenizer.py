@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from torch import amp
 
-from vqgan import VQGAN
+from vq_autoencoder import VQAutoencoder
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class TokenizationResult:
 
 @torch.no_grad()
 def encode_windows_to_tokens(
-    vqgan: VQGAN,
+    vq: VQAutoencoder,
     windows: np.ndarray,
     *,
     batch_size: int,
@@ -35,7 +35,7 @@ def encode_windows_to_tokens(
     Encode window tensors into discrete codebook indices.
 
     Args:
-        vqgan: Trained VQGAN model.
+        vq: Trained VQ autoencoder model.
         windows: (N, 1, 12, T) float32 numpy array.
         batch_size: encoding batch size.
         device: torch device.
@@ -51,7 +51,7 @@ def encode_windows_to_tokens(
             latency_sec_per_sample=0.0,
         )
 
-    vqgan.eval()
+    vq.eval()
     all_tokens = []
     codebook_hw: Optional[Tuple[int, int]] = None
     start = time.time()
@@ -60,7 +60,7 @@ def encode_windows_to_tokens(
     for i in range(0, n, batch_size):
         batch = torch.from_numpy(windows[i : i + batch_size]).to(device=device, dtype=torch.float32, non_blocking=True)
         with amp.autocast(device_type=device.type, enabled=use_amp):
-            quant_z, indices, _ = vqgan.encode(batch)
+            quant_z, indices, _ = vq.encode(batch)
         if codebook_hw is None:
             codebook_hw = (int(quant_z.shape[2]), int(quant_z.shape[3]))
         indices = indices.view(batch.shape[0], -1).detach().to("cpu", non_blocking=False)
@@ -75,4 +75,3 @@ def encode_windows_to_tokens(
         logger.info("[TOKENIZE] %s tokens=%s codebook_hw=%s latency=%.6fs/sample", desc, tokens.shape, codebook_hw, latency)
 
     return TokenizationResult(tokens=tokens, codebook_hw=codebook_hw, latency_sec_per_sample=latency)
-

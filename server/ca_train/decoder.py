@@ -20,7 +20,7 @@ class Decoder(nn.Module):
         #   2) stride (1,2)  : H1 stays, W1 -> W2
         #   3) stride (1,2)  : H1 stays, W2 -> W3
         #
-        # We compute matching upsample targets dynamically so the same VQGAN can
+        # We compute matching upsample targets dynamically so the same VQ autoencoder can
         # be used with different `target_width` values.
         input_height = int(getattr(args, "input_height", 12))
         input_width = int(getattr(args, "input_width", 50))

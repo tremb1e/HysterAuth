@@ -23,7 +23,7 @@ from torch.utils.data import Dataset
 #   window_points = round(window_size_sec * 100Hz)
 # and windows do NOT cross sessions.
 #
-# For VQGAN we build samples shaped as (1, 12, T):
+# For the VQ autoencoder we build samples shaped as (1, 12, T):
 #   9 raw axes + 3 magnitudes (acc/gyr/mag).
 # =============================================================================
 
@@ -79,7 +79,7 @@ def list_available_users(base_path: Path) -> List[str]:
 
 
 class WindowedHMOGDataset(Dataset):
-    """Simple in-memory dataset wrapper used by hmog_vqgan_experiment.py."""
+    """Simple in-memory dataset wrapper used by hmog_vq_experiment.py."""
 
     def __init__(self, windows: np.ndarray, labels: np.ndarray):
         if windows.ndim != 4:
@@ -800,7 +800,7 @@ def precompute_all_user_windows(
     process_workers: int = 0,
 ) -> List[Tuple[str, float]]:
     """
-    Compatibility hook for hmog_vqgan_experiment.py.
+    Compatibility hook for hmog_vq_experiment.py.
 
     Server datasets are already windowed, so we just verify the expected CSV files exist.
     """

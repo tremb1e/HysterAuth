@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Continuous authentication inference for the VQGAN->Token->Transformer(LM) pipeline.
+Continuous authentication inference for the VQ->Token->Transformer(LM) pipeline.
 
 Input:
   - a server-formatted window CSV (same schema as processed_data/window/*/*/*.csv)
@@ -23,7 +23,7 @@ from hmog_consecutive_rejects import ConsecutiveRejectTracker, VoteRejectTracker
 from hmog_data import DEFAULT_OVERLAP, iter_windows_from_csv_unlabeled_with_session
 from hmog_token_transformer import TokenGPTAuthenticator, TokenLMConfig
 from hmog_tokenizer import encode_windows_to_tokens
-from vqgan import VQGAN
+from vq_autoencoder import VQAutoencoder
 
 
 logger = logging.getLogger(__name__)
@@ -37,16 +37,16 @@ def _default_config_path(ckpt_path: Path) -> Path:
     return ckpt_path.with_suffix(".json")
 
 
-def load_vqgan(vqgan_ckpt: Path, *, device: torch.device, cfg_path: Optional[Path] = None) -> VQGAN:
-    cfg_path = cfg_path or _default_config_path(vqgan_ckpt)
+def load_vq(vq_ckpt: Path, *, device: torch.device, cfg_path: Optional[Path] = None) -> VQAutoencoder:
+    cfg_path = cfg_path or _default_config_path(vq_ckpt)
     if not cfg_path.exists():
-        raise FileNotFoundError(f"Missing VQGAN config json: {cfg_path}")
+        raise FileNotFoundError(f"Missing VQ config json: {cfg_path}")
     cfg = _load_json(cfg_path)
     args = argparse.Namespace(**cfg)
-    # The VQGAN module expects these attribute names.
+    # The VQ autoencoder expects these attribute names.
     args.use_nonlocal = bool(cfg.get("use_nonlocal", True))
-    model = VQGAN(args).to(device)
-    model.load_state_dict(torch.load(vqgan_ckpt, map_location=device))
+    model = VQAutoencoder(args).to(device)
+    model.load_state_dict(torch.load(vq_ckpt, map_location=device))
     model.eval()
     return model
 
@@ -56,7 +56,7 @@ def load_lm(lm_ckpt: Path, *, device: torch.device, cfg_path: Optional[Path] = N
     if not cfg_path.exists():
         raise FileNotFoundError(f"Missing LM config json: {cfg_path}")
     cfg = _load_json(cfg_path)
-    # The training script may persist extra metadata (e.g., linked VQGAN checkpoint)
+    # The training script may persist extra metadata (e.g., linked VQ checkpoint)
     # alongside the TokenLMConfig fields. Filter unknown keys for forward-compat.
     allowed = set(TokenLMConfig.__dataclass_fields__.keys())
     cfg_filtered = {k: v for k, v in cfg.items() if k in allowed}
@@ -82,8 +82,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-amp", dest="use_amp", action="store_false")
     parser.set_defaults(use_amp=True)
 
-    parser.add_argument("--vqgan-checkpoint", type=str, required=True)
-    parser.add_argument("--vqgan-config", type=str, default=None)
+    parser.add_argument("--vq-checkpoint", type=str, required=True)
+    parser.add_argument("--vq-config", type=str, default=None)
     parser.add_argument("--lm-checkpoint", type=str, required=True)
     parser.add_argument("--lm-config", type=str, default=None)
 
@@ -201,10 +201,10 @@ def main() -> None:
             float(k_rejects_effective) * stride_sec,
         )
 
-    vqgan = load_vqgan(
-        Path(args.vqgan_checkpoint),
+    vq = load_vq(
+        Path(args.vq_checkpoint),
         device=device,
-        cfg_path=Path(args.vqgan_config) if args.vqgan_config else None,
+        cfg_path=Path(args.vq_config) if args.vq_config else None,
     )
     lm = load_lm(
         Path(args.lm_checkpoint),
@@ -225,7 +225,7 @@ def main() -> None:
             return
         windows_np = np.stack(batch_windows, axis=0).astype(np.float32, copy=False)
         tok = encode_windows_to_tokens(
-            vqgan,
+            vq,
             windows_np,
             batch_size=int(args.batch_size),
             device=device,

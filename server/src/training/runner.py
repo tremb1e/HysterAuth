@@ -37,7 +37,7 @@ def _default_models_root(server_root: Path) -> Path:
 
 
 def _default_ca_train_script() -> Path:
-    return ca_train_script("hmog_vqgan_experiment.py")
+    return ca_train_script("hmog_vq_experiment.py")
 
 
 def _pick_workers() -> Tuple[int, int]:
@@ -47,7 +47,7 @@ def _pick_workers() -> Tuple[int, int]:
     return max(0, int(num_workers)), max(1, int(cpu_threads))
 
 
-def _vqgan_config(target_width: int, *, base_channels: int, latent_dim: int, codebook_vectors: int, beta: float) -> Dict:
+def _vq_config(target_width: int, *, base_channels: int, latent_dim: int, codebook_vectors: int, beta: float) -> Dict:
     return {
         "base_channels": int(base_channels),
         "latent_dim": int(latent_dim),
@@ -60,7 +60,7 @@ def _vqgan_config(target_width: int, *, base_channels: int, latent_dim: int, cod
     }
 
 
-def _write_vqgan_config(cfg: Dict, checkpoint: Path) -> Path:
+def _write_vq_config(cfg: Dict, checkpoint: Path) -> Path:
     config_path = checkpoint.with_suffix(".json")
     config_path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
     return config_path
@@ -98,7 +98,7 @@ def _write_training_summary(user_output_dir: Path, summary: Dict) -> None:
     summary_path.write_text(json.dumps(ordered, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def _write_vqgan_policy(
+def _write_vq_policy(
     user_output_dir: Path,
     *,
     user_id: str,
@@ -107,8 +107,8 @@ def _write_vqgan_policy(
     target_width: int,
     threshold: float,
     k_rejects: int,
-    vqgan_checkpoint: Path,
-    vqgan_config: Path,
+    vq_checkpoint: Path,
+    vq_config: Path,
 ) -> Path:
     policy = {
         "user": str(user_id),
@@ -120,10 +120,10 @@ def _write_vqgan_policy(
         "k_rejects": int(k_rejects),
         "vote_window_size": 0,
         "vote_min_rejects": 0,
-        "auth_method": "vqgan-only",
-        "vqgan_checkpoint": str(vqgan_checkpoint),
-        "vqgan_config": str(vqgan_config),
-        "model_version": vqgan_checkpoint.name,
+        "auth_method": "vq-only",
+        "vq_checkpoint": str(vq_checkpoint),
+        "vq_config": str(vq_config),
+        "model_version": vq_checkpoint.name,
     }
     policy_path = user_output_dir / "best_lock_policy.json"
     policy_path.write_text(json.dumps({str(user_id): policy}, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -135,7 +135,7 @@ def run_window_sweep_for_user(
     *,
     device: str = "cuda:0",
     window_sizes: Optional[Sequence[float]] = None,
-    vqgan_epochs: int = 10,
+    vq_epochs: int = 10,
     batch_size: Optional[int] = None,
     max_train_per_user: Optional[int] = None,
     max_negative_per_split: Optional[int] = None,
@@ -202,9 +202,9 @@ def run_window_sweep_for_user(
                 "--cpu-threads",
                 str(int(cpu_threads)),
                 "--sweep-epochs",
-                str(int(vqgan_epochs)),
+                str(int(vq_epochs)),
                 "--final-epochs",
-                str(int(vqgan_epochs)),
+                str(int(vq_epochs)),
                 "--output-dir",
                 str(user_output_dir),
                 "--log-dir",
@@ -225,18 +225,18 @@ def run_window_sweep_for_user(
         if not isinstance(summary, dict):
             raise ValueError(f"Unexpected summary format in {log_dir}")
 
-        vqgan_checkpoint = Path(str(summary.get("checkpoint") or ""))
-        if not vqgan_checkpoint.exists():
-            raise FileNotFoundError(f"Missing VQGAN checkpoint: {vqgan_checkpoint}")
+        vq_checkpoint = Path(str(summary.get("checkpoint") or ""))
+        if not vq_checkpoint.exists():
+            raise FileNotFoundError(f"Missing VQ checkpoint: {vq_checkpoint}")
 
-        vqgan_cfg = _vqgan_config(
+        vq_cfg = _vq_config(
             target_width,
             base_channels=int(summary.get("base_channels", 96) or 96),
             latent_dim=int(summary.get("latent_dim", 256) or 256),
             codebook_vectors=int(summary.get("num_codebook_vectors", 512) or 512),
             beta=float(summary.get("beta", 0.25) or 0.25),
         )
-        vqgan_config = _write_vqgan_config(vqgan_cfg, vqgan_checkpoint)
+        vq_config = _write_vq_config(vq_cfg, vq_checkpoint)
 
         threshold = float(((summary.get("val") or {}).get("threshold") or 0.0))
         k_rejects = int(
@@ -247,10 +247,10 @@ def run_window_sweep_for_user(
             )
         )
 
-        summary["vqgan_config"] = str(vqgan_config)
+        summary["vq_config"] = str(vq_config)
         summary["threshold"] = threshold
         _write_training_summary(user_output_dir, summary)
-        _write_vqgan_policy(
+        _write_vq_policy(
             user_output_dir,
             user_id=str(user_id),
             window_size=ws_f,
@@ -258,8 +258,8 @@ def run_window_sweep_for_user(
             target_width=int(target_width),
             threshold=threshold,
             k_rejects=k_rejects,
-            vqgan_checkpoint=vqgan_checkpoint,
-            vqgan_config=vqgan_config,
+            vq_checkpoint=vq_checkpoint,
+            vq_config=vq_config,
         )
 
         results.append(

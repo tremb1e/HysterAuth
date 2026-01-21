@@ -167,7 +167,7 @@ import torch
 # Configure Data Loading & Seed
 SEED = 712  # Used for every random function
 #HMOG_HDF5 = Path.cwd().parent / "data" / "processed" / "hmog_dataset.hdf5"
-HMOG_HDF5 = "/home/tremb1e/work/mobilephone/VQGAN-pytorch-main-con-nor/hmog_dataset.hdf5"
+HMOG_HDF5 = "/path/to/hmog_dataset.hdf5"
 #HMOG_HDF5 = None
 #HMOG_HDF5 = "/home/tmac/data/processed/hmog_dataset.hdf5"
 EXCLUDE_COLS = ["sys_time"]
